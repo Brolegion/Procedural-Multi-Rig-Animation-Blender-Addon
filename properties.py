@@ -22,22 +22,80 @@ def apply_creature_preset_callback(self, context):
         'STEVE': {
             'step_height': 0.12, 'stride_angle': 0.35, 'floatiness': 0.6,
             'noise_amount': 0.02, 'push_profile': 'SMOOTH',
-            'push_strength': 0.9, 'com_inertia': 0.6
+            'push_strength': 0.9, 'com_inertia': 0.6,
+            'animation_type': 'WALK'  # Указываем тип анимации
         },
         'ZOMBIE': {
             'step_height': 0.06, 'stride_angle': 0.22, 'floatiness': 0.08,
             'noise_amount': 0.18, 'push_profile': 'SNAPPY',
-            'push_strength': 0.4, 'com_inertia': 0.85
+            'push_strength': 0.4, 'com_inertia': 0.85,
+            'animation_type': 'WALK'
         },
         'SPIDER': {
             'step_height': 0.04, 'stride_angle': 0.28, 'floatiness': 0.0,
             'noise_amount': 0.05, 'push_profile': 'SUSTAIN',
-            'push_strength': 0.6, 'com_inertia': 0.5
+            'push_strength': 0.6, 'com_inertia': 0.5,
+            'animation_type': 'WALK'
         },
         'RUNNER': {
             'step_height': 0.06, 'stride_angle': 0.45,
             'floatiness': 0.12, 'noise_amount': 0.01, 'push_profile': 'SNAPPY',
-            'push_strength': 1.5, 'com_inertia': 0.3
+            'push_strength': 1.5, 'com_inertia': 0.3,
+            'animation_type': 'WALK'
+        },
+        # Пресеты для урона
+        'DAMAGE_LIGHT': {
+            'damage_strength': 0.5,
+            'damage_direction': (0.0, -1.0, 0.0),
+            'damage_duration': 15,
+            'damage_reaction_type': 'IMPACT_ONLY',
+            'damage_attack_shape': 'SHARP',
+            'damage_stiffness': 20.0,
+            'damage_damping': 0.9,
+            'damage_return_to_pose': True,
+            'animation_type': 'DAMAGE'  # Указываем тип анимации
+        },
+        'DAMAGE_MEDIUM': {
+            'damage_strength': 1.2,
+            'damage_direction': (0.2, -0.8, 0.1),
+            'damage_duration': 25,
+            'damage_reaction_type': 'STAGGER',
+            'damage_attack_shape': 'BLUNT',
+            'damage_stiffness': 15.0,
+            'damage_damping': 0.7,
+            'damage_enable_stagger': True,
+            'damage_enable_recovery': True,
+            'damage_return_to_pose': True,
+            'animation_type': 'DAMAGE'
+        },
+        'DAMAGE_HEAVY': {
+            'damage_strength': 2.0,
+            'damage_direction': (0.5, -0.5, 0.3),
+            'damage_duration': 40,
+            'damage_reaction_type': 'COMPLEX',
+            'damage_attack_shape': 'PIERCING',
+            'damage_stiffness': 12.0,
+            'damage_damping': 0.6,
+            'damage_enable_stagger': True,
+            'damage_enable_recovery': True,
+            'damage_return_to_pose': True,
+            'damage_shake': True,
+            'animation_type': 'DAMAGE'
+        },
+        'DAMAGE_KNOCKDOWN': {
+            'damage_strength': 3.0,
+            'damage_direction': (0.3, -0.7, 0.4),
+            'damage_duration': 60,
+            'damage_reaction_type': 'FALL_RECOVER',
+            'damage_attack_shape': 'BLUNT',
+            'damage_stiffness': 10.0,
+            'damage_damping': 0.5,
+            'damage_enable_stagger': True,
+            'damage_enable_recovery': True,
+            'damage_return_to_pose': True,
+            'damage_shake': True,
+            'damage_affect_legs': True,
+            'animation_type': 'DAMAGE'
         }
     }
 
@@ -76,6 +134,28 @@ def update_vehicle_type(self, context):
     if context and context.area:
         context.area.tag_redraw()
 
+class DamageBoneEntry(bpy.types.PropertyGroup):
+    """Одна запись кости для урона"""
+    bone_name: StringProperty(
+        name="Bone",
+        default="",
+        description="Bone to affect with damage"
+    )
+    weight: FloatProperty(
+        name="Weight",
+        default=1.0,
+        min=0.0,
+        max=5.0,
+        description="Influence multiplier for this bone"
+    )
+    stiffness: FloatProperty(
+        name="Stiffness", 
+        default=15.0,
+        min=1.0,
+        max=50.0,
+        description="Physical stiffness for this bone"
+    )
+
 class PW_Settings(PropertyGroup):
     """Properties for Procedural Walk/Turn addon"""
 
@@ -111,7 +191,7 @@ class PW_Settings(PropertyGroup):
         description="Try to detect category from selected object and switch UI accordingly",
         default=True
     )
-    
+
     creature_preset: EnumProperty(
         name="Preset",
         items=[
@@ -120,6 +200,10 @@ class PW_Settings(PropertyGroup):
             ('ZOMBIE', 'Zombie', 'Shamble'),
             ('SPIDER', 'Spider', 'Multi-leg'),
             ('RUNNER', 'Runner', 'Fast'),
+            ('DAMAGE_LIGHT', 'Damage Light', 'Light impact'),
+            ('DAMAGE_MEDIUM', 'Damage Medium', 'Medium impact with stagger'),
+            ('DAMAGE_HEAVY', 'Damage Heavy', 'Heavy impact with complex reaction'),
+            ('DAMAGE_KNOCKDOWN', 'Damage Knockdown', 'Knockdown with recovery'),
         ],
         default='CUSTOM',
         update=apply_creature_preset_callback
@@ -310,6 +394,308 @@ class PW_Settings(PropertyGroup):
     calibration_clamp_max: FloatProperty(name="Calibration Max", default=4.0, min=0.0, max=100.0)
     calibration_scale: FloatProperty(name="Calibration Scale", default=1.0, min=0.0, max=100.0)
 
+    # Damage Animation Properties
+    damage_strength: bpy.props.FloatProperty(
+        name="Impact Strength",
+        description="Strength of the damage impact",
+        default=1.0,
+        min=0.0,
+        max=5.0,
+        precision=2,
+        subtype='FACTOR',
+    )
+
+    damage_direction: bpy.props.FloatVectorProperty(
+        name="Impact Direction",
+        description="Direction of the impact force (world space)",
+        subtype='DIRECTION',
+        default=(0.0, -1.0, 0.0),
+        size=3,
+    )
+
+    damage_duration: bpy.props.IntProperty(
+        name="Duration",
+        description="Animation duration in frames",
+        default=30,
+        min=5,
+        max=300,
+    )
+
+    damage_frame_start: bpy.props.IntProperty(
+        name="Start Frame",
+        description="Frame to start damage animation",
+        default=1,
+        min=1,
+        max=10000,
+    )
+
+    # Reaction type and layers
+    damage_reaction_type: bpy.props.EnumProperty(
+        name="Reaction Type",
+        description="Type of physical reaction to damage",
+        items=[
+            ('IMPACT_ONLY', "Impact Only", "Quick impact with quick recovery"),
+            ('STAGGER', "Stagger", "Impact with staggering aftermath"),
+            ('FALL_RECOVER', "Fall & Recover", "Fall down and get back up"),
+            ('COMPLEX', "Complex", "Multi-layer complex reaction"),
+        ],
+        default='STAGGER',
+    )
+
+    damage_attack_shape: bpy.props.EnumProperty(
+        name="Attack Shape",
+        description="Shape of the attack determining impact character",
+        items=[
+            ('SHARP', "Sharp", "Sharp, directed impact"),
+            ('BLUNT', "Blunt", "Blunt, widespread impact"),
+            ('PIERCING', "Piercing", "Piercing, deep impact"),
+        ],
+        default='BLUNT',
+    )
+
+    # Layer weights
+    damage_impact_weight: bpy.props.FloatProperty(
+        name="Impact Weight",
+        description="Weight of the initial impact layer",
+        default=1.0,
+        min=0.0,
+        max=2.0,
+        precision=2,
+    )
+
+    damage_stagger_weight: bpy.props.FloatProperty(
+        name="Stagger Weight",
+        description="Weight of the stagger layer",
+        default=0.7,
+        min=0.0,
+        max=2.0,
+        precision=2,
+    )
+
+    damage_recovery_weight: bpy.props.FloatProperty(
+        name="Recovery Weight",
+        description="Weight of the recovery layer",
+        default=0.5,
+        min=0.0,
+        max=2.0,
+        precision=2,
+    )
+
+    # Layer patterns
+    damage_stagger_pattern: bpy.props.EnumProperty(
+        name="Stagger Pattern",
+        description="Pattern of stagger movement",
+        items=[
+            ('RANDOM', "Random", "Random stagger"),
+            ('RHYTHMIC', "Rhythmic", "Rhythmic oscillations"),
+            ('CHAOTIC', "Chaotic", "Chaotic, unpredictable movement"),
+        ],
+        default='RANDOM',
+    )
+
+    damage_recovery_type: bpy.props.EnumProperty(
+        name="Recovery Type",
+        description="Type of recovery motion",
+        items=[
+            ('SMOOTH', "Smooth", "Smooth return to pose"),
+            ('BOUNCY', "Bouncy", "Bouncy, spring-like return"),
+            ('STIFF', "Stiff", "Stiff, mechanical return"),
+        ],
+        default='SMOOTH',
+    )
+
+    # Physics parameters
+    damage_stiffness: bpy.props.FloatProperty(
+        name="Body Stiffness",
+        description="Overall stiffness of body reaction",
+        default=15.0,
+        min=1.0,
+        max=50.0,
+        precision=1,
+    )
+
+    damage_damping: bpy.props.FloatProperty(
+        name="Body Damping",
+        description="Overall damping of oscillations",
+        default=0.8,
+        min=0.1,
+        max=2.0,
+        precision=2,
+        subtype='FACTOR',
+    )
+
+    damage_pelvis_factor: bpy.props.FloatProperty(
+        name="Pelvis Influence",
+        description="How much the pelvis (center of mass) is affected",
+        default=0.7,
+        min=0.0,
+        max=2.0,
+        precision=2,
+    )
+
+    # Zone masses
+    damage_spine_mass: bpy.props.FloatProperty(
+        name="Spine Mass",
+        description="Mass factor for spine bones",
+        default=1.0,
+        min=0.1,
+        max=5.0,
+        precision=2,
+    )
+
+    damage_head_mass: bpy.props.FloatProperty(
+        name="Head Mass",
+        description="Mass factor for head bones",
+        default=0.8,
+        min=0.1,
+        max=5.0,
+        precision=2,
+    )
+
+    damage_arm_mass: bpy.props.FloatProperty(
+        name="Arm Mass",
+        description="Mass factor for arm bones",
+        default=0.6,
+        min=0.1,
+        max=5.0,
+        precision=2,
+    )
+
+    damage_leg_mass: bpy.props.FloatProperty(
+        name="Leg Mass",
+        description="Mass factor for leg bones",
+        default=0.4,
+        min=0.1,
+        max=5.0,
+        precision=2,
+    )
+
+    # Return settings
+    damage_return_to_pose: bpy.props.BoolProperty(
+        name="Return to Pose",
+        description="Return to original pose after hit",
+        default=True,
+    )
+
+    damage_return_speed: bpy.props.FloatProperty(
+        name="Return Speed",
+        description="Speed of return to original pose",
+        default=0.5,
+        min=0.1,
+        max=2.0,
+        precision=2,
+    )
+
+    # Affected zones
+    damage_affect_spine: bpy.props.BoolProperty(
+        name="Affect Spine",
+        description="Apply reaction to spine bones",
+        default=True,
+    )
+
+    damage_affect_head: bpy.props.BoolProperty(
+        name="Affect Head",
+        description="Apply reaction to head bones",
+        default=True,
+    )
+
+    damage_affect_arms: bpy.props.BoolProperty(
+        name="Affect Arms",
+        description="Apply reaction to arm bones",
+        default=True,
+    )
+
+    damage_affect_legs: bpy.props.BoolProperty(
+        name="Affect Legs",
+        description="Apply reaction to leg bones",
+        default=False,
+    )
+
+    # Additional effects
+    damage_shake: bpy.props.BoolProperty(
+        name="Add Shake",
+        description="Add subtle shaking during impact",
+        default=True,
+    )
+
+    # UI controls (важные - используются в UI!)
+    show_advanced_damage: bpy.props.BoolProperty(
+        name="Show Advanced Damage Settings",
+        default=False,
+    )
+
+    damage_enable_stagger: bpy.props.BoolProperty(
+        name="Enable Stagger",
+        description="Enable stagger/shake after impact",
+        default=True,
+    )
+
+    damage_enable_recovery: bpy.props.BoolProperty(
+        name="Enable Recovery",
+        description="Enable recovery to original pose",
+        default=True,
+    )
+
+    # Новые свойства для UI (отсутствуют в вашем коде)
+    show_mass_distribution: bpy.props.BoolProperty(
+        name="Show Mass Distribution",
+        default=False,
+    )
+
+    show_damage_debug: bpy.props.BoolProperty(
+        name="Show Damage Debug",
+        default=False,
+    )
+    # ===== НОВАЯ ПРОСТАЯ СИСТЕМА =====
+    damage_bones_primary: bpy.props.CollectionProperty(type=DamageBoneEntry)
+    damage_bones_secondary: bpy.props.CollectionProperty(type=DamageBoneEntry)
+    
+    # Активный индекс для UI
+    damage_active_primary: bpy.props.IntProperty(default=0)
+    damage_active_secondary: bpy.props.IntProperty(default=0)
+    
+    # Флаги включения
+    use_primary_bones: bpy.props.BoolProperty(
+        name="Use Primary Bones",
+        default=True,
+        description="Enable primary bones for damage"
+    )
+    use_secondary_bones: bpy.props.BoolProperty(
+        name="Use Secondary Bones", 
+        default=False,
+        description="Enable secondary bones for damage"
+    )
+    
+    damage_propagation_chain: bpy.props.IntProperty(
+        name="Propagation Chain Length",
+        description="How many bones in chain to affect from center",
+        default=3,
+        min=1,
+        max=10,
+    )
+
+    damage_return_frames: bpy.props.IntProperty(
+        name="Return Frames",
+        description="Number of frames for smooth return to pose",
+        default=10,
+        min=1,
+        max=50,
+    )
+
+    damage_wave_speed: bpy.props.FloatProperty(
+        name="Wave Speed",
+        description="Speed of damage propagation through skeleton",
+        default=2.0,
+        min=0.5,
+        max=5.0,
+        precision=2,
+    )
+
+    damage_micro_jitter: bpy.props.BoolProperty(
+        name="Micro Jitter",
+        description="Add micro-shaking for juicy effect",
+        default=True,
+    )
 
 
     # IK offsets & rear retargeting
@@ -500,6 +886,7 @@ class PW_Settings(PropertyGroup):
             ('CUSTOM', 'Custom', ''),
             ('TURN', 'Turn', 'Procedural body turn'),
             ('FULL_BODY_SWING', 'Full Body Swing', 'Full body rotation without return'),
+            ('DAMAGE', 'Damage', 'Damage effect triggered'),
             ('JUMP', 'Jump', 'Procedural jump with squash/stretch')  # НОВОЕ
         ],
         default='WALK'
@@ -987,9 +1374,11 @@ class PW_Settings(PropertyGroup):
 
 
 def register():
+    bpy.utils.register_class(DamageBoneEntry)
     bpy.utils.register_class(PW_Settings)
     bpy.types.Scene.pw_settings = bpy.props.PointerProperty(type=PW_Settings)
 
 def unregister():
+    bpy.utils.unregister_class(DamageBoneEntry)
     bpy.utils.unregister_class(PW_Settings)
     del bpy.types.Scene.pw_settings
