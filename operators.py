@@ -10,6 +10,7 @@ from .turn_animation import generate_turn_animation
 from .fullbodyswing_animation import generate_full_body_swing
 from .vehicle_animation import generate_vehicle_animation
 from .jump_animation import generate_armature_jump
+from .damage_animation import generate_damage_animation
 
 
 # imports for simple unit animations
@@ -75,6 +76,129 @@ def _dict_to_settings(d, settings):
             except Exception:
                 pass
 
+
+# operators.py
+class PW_OT_AddDamageBone(bpy.types.Operator):
+    """Добавить кость в список"""
+    bl_idname = "pw.add_damage_bone"
+    bl_label = "Add Bone"
+    bl_description = "Add a bone to damage list"
+    
+    list_type: bpy.props.StringProperty(default="primary")
+    
+    def execute(self, context):
+        settings = context.scene.pw_settings
+        
+        if self.list_type == "primary":
+            new_item = settings.damage_bones_primary.add()
+            settings.damage_active_primary = len(settings.damage_bones_primary) - 1
+        else:
+            new_item = settings.damage_bones_secondary.add()
+            settings.damage_active_secondary = len(settings.damage_bones_secondary) - 1
+        
+        new_item.bone_name = ""
+        new_item.weight = 1.0
+        new_item.stiffness = 15.0
+        
+        return {'FINISHED'}
+
+class PW_OT_RemoveDamageBone(bpy.types.Operator):
+    """Удалить кость из списка"""
+    bl_idname = "pw.remove_damage_bone"
+    bl_label = "Remove Bone"
+    bl_description = "Remove bone from damage list"
+    
+    list_type: bpy.props.StringProperty(default="primary")
+    index: bpy.props.IntProperty(default=-1)
+    
+    def execute(self, context):
+        settings = context.scene.pw_settings
+        
+        if self.list_type == "primary":
+            if self.index >= 0:
+                settings.damage_bones_primary.remove(self.index)
+            elif settings.damage_active_primary >= 0:
+                settings.damage_bones_primary.remove(settings.damage_active_primary)
+            settings.damage_active_primary = min(
+                settings.damage_active_primary,
+                len(settings.damage_bones_primary) - 1
+            )
+        else:
+            if self.index >= 0:
+                settings.damage_bones_secondary.remove(self.index)
+            elif settings.damage_active_secondary >= 0:
+                settings.damage_bones_secondary.remove(settings.damage_active_secondary)
+            settings.damage_active_secondary = min(
+                settings.damage_active_secondary,
+                len(settings.damage_bones_secondary) - 1
+            )
+        
+        return {'FINISHED'}
+
+class PW_OT_MoveDamageBone(bpy.types.Operator):
+    """Переместить кость в списке"""
+    bl_idname = "pw.move_damage_bone"
+    bl_label = "Move Bone"
+    bl_description = "Move bone up/down in list"
+    
+    list_type: bpy.props.StringProperty(default="primary")
+    direction: bpy.props.StringProperty(default="UP")  # UP or DOWN
+    
+    def execute(self, context):
+        settings = context.scene.pw_settings
+        
+        if self.list_type == "primary":
+            collection = settings.damage_bones_primary
+            active_idx = settings.damage_active_primary
+        else:
+            collection = settings.damage_bones_secondary
+            active_idx = settings.damage_active_secondary
+        
+        if not 0 <= active_idx < len(collection):
+            return {'CANCELLED'}
+        
+        new_idx = active_idx - 1 if self.direction == "UP" else active_idx + 1
+        
+        if 0 <= new_idx < len(collection):
+            collection.move(active_idx, new_idx)
+            if self.list_type == "primary":
+                settings.damage_active_primary = new_idx
+            else:
+                settings.damage_active_secondary = new_idx
+        
+        return {'FINISHED'}
+
+class PW_OT_AutoFillDamageBones(bpy.types.Operator):
+    """Автозаполнить кости из выбранных в 3D View"""
+    bl_idname = "pw.auto_fill_damage_bones"
+    bl_label = "Auto-Fill from Selection"
+    bl_description = "Fill bones from selected bones in pose mode"
+    
+    def execute(self, context):
+        settings = context.scene.pw_settings
+        arm_obj = context.active_object
+        
+        if not arm_obj or arm_obj.type != 'ARMATURE':
+            self.report({'WARNING'}, "Select an armature in pose mode")
+            return {'CANCELLED'}
+        
+        # Очищаем текущие списки
+        settings.damage_bones_primary.clear()
+        
+        # Добавляем выбранные кости
+        for pb in arm_obj.pose.bones:
+            if pb.bone.select:
+                new_item = settings.damage_bones_primary.add()
+                new_item.bone_name = pb.name
+                new_item.weight = 1.0
+                new_item.stiffness = 15.0
+        
+        if len(settings.damage_bones_primary) == 0:
+            self.report({'INFO'}, "No bones selected")
+        else:
+            self.report({'INFO'}, f"Added {len(settings.damage_bones_primary)} bones")
+        
+        return {'FINISHED'}
 # ==================== ОПЕРАТОРЫ ДЛЯ РАБОТЫ С ПРЕСЕТАМИ (общие) ====================
 
 class PW_OT_PresetExport(bpy.types.Operator):
@@ -141,14 +265,27 @@ class PW_OT_PresetImport(bpy.types.Operator):
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
+
 class PW_OT_ApplyPreset(bpy.types.Operator):
     """Применить выбранный пресет"""
     bl_idname = "pw.apply_preset"
     bl_label = "Apply Preset"
     bl_description = "Apply the selected preset"
-    
+
+    preset_type: bpy.props.StringProperty(default='CUSTOM')  # Добавляем свойство
+
     def execute(self, context):
         settings = context.scene.pw_settings
+
+        # Если задан конкретный пресет через preset_type, используем его
+        if self.preset_type != 'CUSTOM':
+            settings.creature_preset = self.preset_type
+
+        # Если это пресет урона, автоматически устанавливаем тип анимации
+        if self.preset_type.startswith('DAMAGE_'):
+            settings.animation_type = 'DAMAGE'
+
+        # Применяем пресет
         apply_creature_preset_callback(settings, context)
         self.report({'INFO'}, f"Preset {settings.creature_preset} applied")
         return {'FINISHED'}
@@ -468,7 +605,7 @@ class PW_OT_GenerateMechanical(bpy.types.Operator):
 
 class PW_OT_Generate(bpy.types.Operator):
     """Генерирует процедурную анимацию и применяет центр масс (COM)."""
-    bl_idname = "pw.generate_walk"
+    bl_idname = "pw.generate_animation"
     bl_label = "Generate Animation"
     bl_description = "Generate procedural animation and compute/apply COM"
     bl_options = {'REGISTER', 'UNDO'}
@@ -505,6 +642,8 @@ class PW_OT_Generate(bpy.types.Operator):
                 generate_turn_animation(arm_obj, settings)
             elif settings.animation_type == 'FULL_BODY_SWING':
                 generate_full_body_swing(arm_obj, left_name, right_name, settings)
+            elif settings.animation_type == 'DAMAGE':
+                generate_damage_animation(arm_obj, settings)
             elif settings.animation_type == 'JUMP':
                 # Для сложных арматур используем новую функцию
                 generate_armature_jump(arm_obj, settings)
@@ -622,6 +761,11 @@ def register():
     bpy.utils.register_class(PW_OT_SetNegativeAngle)
 
     bpy.utils.register_class(PW_OT_GenerateMechanical)
+    
+    bpy.utils.register_class(PW_OT_AddDamageBone)
+    bpy.utils.register_class(PW_OT_RemoveDamageBone)
+    bpy.utils.register_class(PW_OT_MoveDamageBone)
+    bpy.utils.register_class(PW_OT_AutoFillDamageBones)
 
 def unregister():
     bpy.utils.unregister_class(PW_OT_SetNegativeAngle)
@@ -649,3 +793,8 @@ def unregister():
     bpy.utils.unregister_class(PW_OT_PresetExport)
 
     bpy.utils.unregister_class(PW_OT_GenerateMechanical)
+    
+    bpy.utils.unregister_class(PW_OT_AutoFillDamageBones)
+    bpy.utils.unregister_class(PW_OT_MoveDamageBone)
+    bpy.utils.unregister_class(PW_OT_RemoveDamageBone)
+    bpy.utils.unregister_class(PW_OT_AddDamageBone)
