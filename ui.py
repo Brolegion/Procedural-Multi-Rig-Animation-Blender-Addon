@@ -21,6 +21,8 @@ from .operators import (
     PW_OT_GenerateSimpleShoot,
     PW_OT_GenerateSimpleRoll,
     PW_OT_GenerateSimpleFly,
+    PW_OT_GenerateSimpleDeath,  # Добавьте эту строку
+    PW_OT_GenerateSimpleStun  # И эту строку
 )
 from . import utils
 
@@ -272,7 +274,33 @@ class PW_PT_LivingPanel(bpy.types.Panel):
                     box_ik.prop(settings, "ik_step_factor")
             box_ik.prop(settings, "rear_copy_mode", text=tr("Rear Copy Mode", lang))
 
+        # В методе draw класса PW_PT_LivingPanel добавьте блок для IDLE:
+        elif settings.animation_type == 'IDLE':
+            box = layout.box()
+            box.label(text=tr("IDLE ANIMATION", lang))
+            box.operator("pw.generate_animation", text=tr("Generate Idle Animation", lang))
 
+            # Основные настройки
+            box2 = layout.box()
+            box2.label(text=tr("Idle Settings", lang))
+            box2.prop(settings, "frame_start", text="Start Frame")
+            box2.prop(settings, "frame_end", text="End Frame")
+            box2.prop(settings, "idle_amp", text="Breathing Amplitude")
+            box2.prop(settings, "idle_freq", text="Animation Frequency")
+            box2.prop(settings, "idle_rot_deg", text="Spine Rotation (deg)")
+            box2.prop(settings, "noise_amount", text="Noise Amount")
+
+            # Настройки позвоночника
+            box3 = layout.box()
+            box3.label(text=tr("Spine Chain Settings", lang))
+            box3.prop(settings, "spine_root_bone", text="Spine Root Bone")
+            box3.prop(settings, "spine_end_bone", text="End Spine Bone")
+
+            # Дополнительные опции
+            box4 = layout.box()
+            box4.label(text=tr("Additional Options", lang))
+            box4.prop(settings, "use_arm_animation", text="Animate Arms")
+            box4.prop(settings, "use_ik", text="Use IK (Pin Feet)")
 
         elif settings.animation_type == 'TURN':
             box = layout.box()
@@ -451,6 +479,290 @@ class PW_PT_LivingPanel(bpy.types.Panel):
             if settings.force_humanoid_override:
                 box6.prop(settings, "force_humanoid", text=tr("Force Humanoid", lang))
 
+        # ui.py
+        # ... (существующий код)
+
+        # В классе PW_PT_LivingPanel, в методе draw, в блоке выбора animation_type нужно добавить 'PANIC':
+        # ... (в начале метода draw, где есть row.prop(settings, "animation_type", ...)
+        # Добавьте PANIC в список доступных animation_type (это должно быть уже в properties.py)
+
+        # Затем в условных блоках (после блоков для WALK, IDLE, TURN, JUMP, FULL_BODY_SWING, DODGE, DAMAGE)
+        # добавьте блок для PANIC:
+
+        elif settings.animation_type == 'PANIC':
+            box = layout.box()
+            box.label(text=tr("PANIC ANIMATION", lang))
+            box.operator("pw.generate_animation", text=tr("Generate Panic Animation", lang), icon='GHOST_ENABLED')
+
+            # Основные настройки паники
+            box2 = layout.box()
+            box2.label(text=tr("Panic Settings", lang))
+            col = box2.column(align=True)
+            col.prop(settings, "panic_duration", text=tr("Panic Duration", lang))
+            col.prop(settings, "panic_recovery_duration", text=tr("Recovery Duration", lang))
+            col.prop(settings, "panic_intensity", text=tr("Intensity", lang))
+            col.prop(settings, "panic_variation", text=tr("Panic Type", lang))
+
+            # Фазовые настройки
+            box3 = layout.box()
+            box3.label(text=tr("Phase Settings", lang))
+            box3.prop(settings, "panic_shock_response", text=tr("Shock Response Speed", lang))
+            box3.prop(settings, "panic_tremble_frequency", text=tr("Tremble Frequency", lang))
+            box3.prop(settings, "panic_breath_speed", text=tr("Breathing Speed", lang))
+
+            # Выбор костей для паники
+            box4 = layout.box()
+            box4.label(text=tr("Bone Selection", lang), icon='BONE_DATA')
+
+            # Кнопка автозаполнения
+            row = box4.row()
+            row.operator("pw.panic_auto_fill", icon='AUTO', text=tr("Auto-Fill Bones", lang))
+
+            # Primary Bones (спина, голова)
+            col = box4.column(align=True)
+            row = col.row()
+            row.prop(settings, "use_panic_primary", text=tr("Primary Bones (Spine/Head)", lang), toggle=True)
+
+            if settings.use_panic_primary:
+                # Кнопки управления для Primary
+                row = col.row(align=True)
+                op_add = row.operator("pw.bone_list_add", text="", icon='ADD')
+                op_add.target_list = 'panic_primary'
+                op_rem = row.operator("pw.bone_list_remove", text="", icon='REMOVE')
+                op_rem.target_list = 'panic_primary'
+
+                # Список Primary костей
+                if settings.panic_bones_primary:
+                    box_list = col.box()
+                    for i, item in enumerate(settings.panic_bones_primary):
+                        row = box_list.row(align=True)
+                        # Маркер активного
+                        if i == settings.panic_active_primary:
+                            row.label(text="•", icon='DOT')
+                        else:
+                            row.label(text="", icon='BLANK1')
+
+                        # Поле ввода кости
+                        row.prop(item, "bone_name", text="")
+
+                        # Вес
+                        if item.bone_name:
+                            sub = row.row(align=True)
+                            sub.scale_x = 0.7
+                            sub.prop(item, "weight", text="W", slider=True)
+
+            # Secondary Bones (руки, ноги для дрожи)
+            col.separator()
+            row = col.row()
+            row.prop(settings, "use_panic_secondary", text=tr("Secondary Bones (Arms/Legs)", lang), toggle=True)
+
+            if settings.use_panic_secondary:
+                # Кнопки управления для Secondary
+                row = col.row(align=True)
+                op_add = row.operator("pw.bone_list_add", text="", icon='ADD')
+                op_add.target_list = 'panic_secondary'
+                op_rem = row.operator("pw.bone_list_remove", text="", icon='REMOVE')
+                op_rem.target_list = 'panic_secondary'
+
+                # Список Secondary костей
+                if settings.panic_bones_secondary:
+                    box_list = col.box()
+                    for i, item in enumerate(settings.panic_bones_secondary):
+                        row = box_list.row(align=True)
+                        if i == settings.panic_active_secondary:
+                            row.label(text="•", icon='DOT')
+                        else:
+                            row.label(text="", icon='BLANK1')
+
+                        row.prop(item, "bone_name", text="")
+
+                        if item.bone_name:
+                            sub = row.row(align=True)
+                            sub.scale_x = 0.7
+                            sub.prop(item, "weight", text="W", slider=True)
+
+            # Расширенные настройки
+            box5 = layout.box()
+            box5.prop(settings, "show_advanced_panic",
+                      text=tr("Advanced Settings", lang),
+                      icon='TRIA_DOWN' if settings.show_advanced_panic else 'TRIA_RIGHT',
+                      emboss=False)
+
+            if settings.show_advanced_panic:
+                # Настройки дрожи
+                box_tremble = box5.box()
+                box_tremble.label(text=tr("Tremble Details", lang))
+                box_tremble.prop(settings, "panic_seed", text=tr("Noise Seed", lang))
+                box_tremble.prop(settings, "panic_tremble_amplitude", text=tr("Tremble Amplitude", lang))
+                box_tremble.prop(settings, "panic_head_shake", text=tr("Head Shake Intensity", lang))
+
+                # Настройки дыхания
+                box_breath = box5.box()
+                box_breath.label(text=tr("Breathing Pattern", lang))
+                box_breath.prop(settings, "panic_breath_amplitude", text=tr("Breath Amplitude", lang))
+                box_breath.prop(settings, "panic_breath_variation", text=tr("Breath Variation", lang))
+
+                # Физические параметры
+                box_physics = box5.box()
+                box_physics.label(text=tr("Physics Parameters", lang))
+                box_physics.prop(settings, "panic_stiffness", text=tr("Body Stiffness", lang))
+                box_physics.prop(settings, "panic_damping", text=tr("Body Damping", lang))
+
+                # Дополнительные эффекты
+                box_effects = box5.box()
+                box_effects.label(text=tr("Additional Effects", lang))
+                box_effects.prop(settings, "panic_eyes_wide", text=tr("Eyes Wide Open", lang))
+                box_effects.prop(settings, "panic_micro_movements", text=tr("Micro Movements", lang))
+
+            # Общие настройки (COM/центр)
+            box6 = layout.box()
+            box6.label(text=tr("Center of Mass", lang))
+            box6.prop(settings, "center_enabled")
+            if settings.center_enabled:
+                box6.prop(settings, "center_apply_mode", text=tr("Center Apply", lang))
+                box6.prop(settings, "center_target_bone")
+                box6.prop(settings, "center_preserve_height")
+
+            # Настройки IK (фиксация ног при дрожи)
+            box7 = layout.box()
+            box7.label(text=tr("Leg Stabilization", lang))
+            box7.prop(settings, "use_ik", text=tr("Use IK (Sticky Feet)", lang))
+            if settings.use_ik:
+                row = box7.row(align=True)
+                row.prop(settings, "left_leg_name", text=tr("Left Leg", lang))
+                row.prop(settings, "right_leg_name", text=tr("Right Leg", lang))
+                box7.prop(settings, "panic_leg_stiffness", text=tr("Leg Stiffness", lang))
+
+        # ... (продолжение существующего кода)
+
+        # В методе draw класса PW_PT_LivingPanel добавьте блок для DODGE:
+        elif settings.animation_type == 'DODGE':
+                    box = layout.box()
+                    box.label(text="DODGE SETTINGS", icon='ACTION')
+                    box.operator("pw.generate_animation", text="Generate Dodge")
+                    
+                    # --- Основные параметры ---
+                    col = box.column(align=True)
+                    col.prop(settings, "dodge_type")
+                    col.prop(settings, "threat_direction")
+                    row = col.row(align=True)
+                    row.prop(settings, "dodge_distance", text="Distance")
+                    row.prop(settings, "dodge_crouch", text="Crouch")
+                    
+                    # --- Тайминг и Физика ---
+                    box_phys = box.box()
+                    box_phys.label(text="Timing & Physics", icon='PHYSICS')
+                    row = box_phys.row(align=True)
+                    row.prop(settings, "dodge_duration", text="Action")
+                    row.prop(settings, "dodge_recovery", text="Recovery") # Исправлено на dodge_recovery
+                    
+                    col = box_phys.column(align=True)
+                    col.prop(settings, "dodge_anticipation", text="Anticipation (0-1)")
+                    col.prop(settings, "dodge_spring_freq", text="Spring Speed")
+                    col.prop(settings, "dodge_spring_damp", text="Spring Damping")
+                    col.prop(settings, "dodge_overshoot", text="Overshoot/Elasticity")
+
+                    # --- Центр Масс (COM) ---
+                    box_com = box.box()
+                    box_com.label(text="Center of Mass (Movement)", icon='CENTER_ONLY')
+                    box_com.prop(settings, "center_enabled", text="Enable Body Displacement")
+                    if settings.center_enabled:
+                        box_com.prop(settings, "center_apply_mode", text="Apply To")
+                        box_com.prop(settings, "center_target_bone", text="Root/Pelvis Bone")
+
+                    # --- Ноги (Sticky Feet / IK) ---
+                    box_ik = box.box()
+                    box_ik.label(text="Sticky Feet (IK)", icon='CONSTRAINT_BONE')
+                    box_ik.prop(settings, "dodge_sticky_feet", text="Use Sticky Feet")
+                    if settings.dodge_sticky_feet:
+                        row = box_ik.row(align=True)
+                        row.prop(settings, "left_leg_name", text="L Leg")
+                        row.prop(settings, "right_leg_name", text="R Leg")
+                        box_ik.prop(settings, "use_ik", text="Enable IK Constraints")
+
+                    # --- Вторичные движения и Шум ---
+                    box_noise = box.box()
+                    box_noise.label(text="Secondary & Noise", icon='COLORSET_03_VEC')
+                    box_noise.prop(settings, "dodge_counter_rot", text="Enable Body Lean/Tilt")
+                    box_noise.prop(settings, "dodge_tilt", text="Tilt Strength")
+                    row = box_noise.row(align=True)
+                    row.prop(settings, "dodge_noise_amount", text="Noise")
+                    row.prop(settings, "dodge_noise_seed", text="Seed")
+
+                    # === ВЫБОР КОСТЕЙ ===
+                    box_bones = box.box()
+                    row = box_bones.row()
+                    row.label(text="Bone Selection", icon='BONE_DATA')
+                    row.operator("pw.dodge_auto_fill", text="Auto-Fill", icon='MODIFIER')
+                    
+                    # (Далее ваши существующие блоки для Primary и Secondary костей...)
+                    
+# ... (внутри секции DODGE в draw_living_panel или аналогичной)
+
+                    # === ВЫБОР КОСТЕЙ ===
+                    box_bones = box.box()
+                    row = box_bones.row()
+                    row.label(text="Bone Selection", icon='BONE_DATA')
+                    row.operator("pw.dodge_auto_fill", text="Auto-Fill", icon='MODIFIER')
+                    
+                    # --- Primary Bones ---
+                    col = box_bones.column(align=True)
+                    row = col.row()
+                    row.prop(settings, "use_dodge_primary", text="Primary (Spine/Root)", toggle=True)
+                    
+                    if settings.use_dodge_primary:
+                        # Кнопки
+                        row = col.row(align=True)
+                        op_add = row.operator("pw.bone_list_add", text="Add Selected", icon='ADD')
+                        op_add.target_list = 'dodge_primary'
+                        
+                        op_rem = row.operator("pw.bone_list_remove", text="Remove", icon='REMOVE')
+                        op_rem.target_list = 'dodge_primary'
+                        
+                        # Список
+                        box_list = col.box()
+                        for i, item in enumerate(settings.dodge_bones_primary):
+                            row = box_list.row(align=True)
+                            # Маркер активного
+                            if i == settings.dodge_active_primary:
+                                row.label(text="", icon='TRIA_RIGHT')
+                            
+                            row.prop(item, "bone_name", text="")
+                            row.prop(item, "weight", text="W", slider=True)
+                            
+                            # Кнопки перемещения (можно вынести отдельно, но удобно тут)
+                            sub = row.row(align=True)
+                            op_up = sub.operator("pw.bone_list_move", text="", icon='TRIA_UP')
+                            op_up.target_list = 'dodge_primary'
+                            op_up.direction = 'UP'
+                            
+                            op_dn = sub.operator("pw.bone_list_move", text="", icon='TRIA_DOWN')
+                            op_dn.target_list = 'dodge_primary'
+                            op_dn.direction = 'DOWN'
+
+                    # --- Secondary Bones ---
+                    col.separator()
+                    row = col.row()
+                    row.prop(settings, "use_dodge_secondary", text="Secondary (Arms/Head)", toggle=True)
+                    
+                    if settings.use_dodge_secondary:
+                        # Кнопки
+                        row = col.row(align=True)
+                        op_add = row.operator("pw.bone_list_add", text="Add Selected", icon='ADD')
+                        op_add.target_list = 'dodge_secondary'
+                        
+                        op_rem = row.operator("pw.bone_list_remove", text="Remove", icon='REMOVE')
+                        op_rem.target_list = 'dodge_secondary'
+                        
+                        # Список
+                        box_list = col.box()
+                        for i, item in enumerate(settings.dodge_bones_secondary):
+                            row = box_list.row(align=True)
+                            if i == settings.dodge_active_secondary:
+                                row.label(text="", icon='TRIA_RIGHT')
+                            
+                            row.prop(item, "bone_name", text="")
+                            row.prop(item, "weight", text="W", slider=True)
         # ui.py - в функции draw_damage_settings
         elif settings.animation_type == 'DAMAGE':
             box = layout.box()
@@ -504,7 +816,7 @@ class PW_PT_LivingPanel(bpy.types.Panel):
             
             # Кнопка автозаполнения
             row = box_bones.row()
-            row.operator("pw.auto_fill_damage_bones", icon='AUTO', text=tr("Auto-Fill from Selection", lang))
+            row.operator("pw.dodge_auto_fill", icon='AUTO', text=tr("Auto-Fill from Selection", lang))
             
             # Две колонки для костей
             split = box_bones.split(factor=0.5)
@@ -519,13 +831,13 @@ class PW_PT_LivingPanel(bpy.types.Panel):
             if settings.use_primary_bones:
                 # Кнопки управления для Primary
                 row = sub_box.row(align=True)
-                row.operator("pw.add_damage_bone", text="", icon='ADD').list_type = 'primary'
-                row.operator("pw.remove_damage_bone", text="", icon='REMOVE').list_type = 'primary'
+                row.operator("pw.bone_list_add", text="", icon='ADD').target_list = 'damage_primary'
+                row.operator("pw.bone_list_remove", text="", icon='REMOVE').target_list = 'damage_primary'
                 
                 if settings.damage_bones_primary:
                     row.separator()
-                    row.operator("pw.move_damage_bone", text="", icon='TRIA_UP').list_type = 'primary'
-                    row.operator("pw.move_damage_bone", text="", icon='TRIA_DOWN').list_type = 'primary'
+                    row.operator("pw.bone_list_move", text="", icon='TRIA_UP').target_list = 'damage_primary'
+                    row.operator("pw.bone_list_move", text="", icon='TRIA_DOWN').target_list = 'damage_primary'
                 
                 # Список Primary костей
                 for i, item in enumerate(settings.damage_bones_primary):
@@ -556,13 +868,13 @@ class PW_PT_LivingPanel(bpy.types.Panel):
             if settings.use_secondary_bones:
                 # Кнопки управления для Secondary
                 row = sub_box.row(align=True)
-                row.operator("pw.add_damage_bone", text="", icon='ADD').list_type = 'secondary'
-                row.operator("pw.remove_damage_bone", text="", icon='REMOVE').list_type = 'secondary'
+                row.operator("pw.bone_list_add", text="", icon='ADD').target_list = 'damage_secondary'
+                row.operator("pw.bone_list_remove", text="", icon='REMOVE').target_list = 'damage_secondary'
                 
                 if settings.damage_bones_secondary:
                     row.separator()
-                    row.operator("pw.move_damage_bone", text="", icon='TRIA_UP').list_type = 'secondary'
-                    row.operator("pw.move_damage_bone", text="", icon='TRIA_DOWN').list_type = 'secondary'
+                    row.operator("pw.bone_list_move", text="", icon='TRIA_UP').target_list = 'damage_secondary'
+                    row.operator("pw.bone_list_move", text="", icon='TRIA_DOWN').target_list = 'damage_secondary'
                 
                 # Список Secondary костей
                 for i, item in enumerate(settings.damage_bones_secondary):
@@ -669,7 +981,7 @@ class PW_PT_LivingPanel(bpy.types.Panel):
 
                 # Дополнительные эффекты
                 box_effects = box5.box()
-                box_effects.label(text=tr("Additional Effects", lang), icon='FORCE_TURBULENCE')
+                box_effects.label(text=tr("Additional Effects", lang), icon='WAVES')
                 box_effects.prop(settings, "damage_shake", text=tr("Add Shake", lang), toggle=1)
 
                 box_advanced = box5.box()
@@ -689,6 +1001,371 @@ class PW_PT_LivingPanel(bpy.types.Panel):
             if settings.debug_pw:
                 box7.prop(settings, "show_damage_debug", text=tr("Show Damage Debug", lang))
 
+        # В классе PW_PT_LivingPanel, в методе draw, добавьте блок для 'SNEAK':
+        elif settings.animation_type == 'SNEAK':
+            box = layout.box()
+            box.label(text=tr("SNEAK / CROUCH WALK", lang), icon='GHOST_ENABLED')
+
+            # Preset & Action
+            row = box.row(align=True)
+            row.prop(settings, "creature_preset", text=tr("Preset", lang))
+            row.operator("pw.apply_preset", text="", icon='CHECKMARK')
+            box.operator("pw.generate_animation", text=tr("Generate Sneak Animation", lang), icon='ANIM_DATA')
+
+            # 1. Основные параметры (Timing & Body)
+            box2 = layout.box()
+            box2.label(text=tr("Body & Timing", lang), icon='POSE_HLT')
+            col = box2.column(align=True)
+            col.prop(settings, "frame_start")
+            col.prop(settings, "frame_end")
+            col.prop(settings, "stride_angle")
+            col.prop(settings, "frequency", text=tr("Sneak Speed", lang))
+            col.prop(settings, "sneak_depth", text=tr("Crouch Depth", lang))
+            col.prop(settings, "sneak_hesitation", text=tr("Cautious Step (Hesitation)", lang))
+
+            # 2. Позвоночник и Голова
+            box3 = layout.box()
+            box3.label(text=tr("Upper Body & Stealth", lang), icon='HIDE_ON')
+            box3.prop(settings, "sneak_spine_arch", text=tr("Spine Lean", lang))
+            box3.prop(settings, "sneak_head_stabilize", text=tr("Head Focus", lang))
+            box3.prop(settings, "sneak_noise_intensity", text=tr("Body Shiver/Tension", lang))
+
+            col_sp = box3.column(align=True)
+            col_sp.prop(settings, "spine_root_bone", text=tr("Root", lang))
+            col_sp.prop(settings, "spine_end_bone", text=tr("End", lang))
+
+            # 3. Ноги и Шаг
+            box4 = layout.box()
+            box4.label(text=tr("Legs & Footwork", lang), icon='CURVE_PATH')
+            row_legs = box4.row(align=True)
+            row_legs.prop(settings, "left_leg_name", text="")
+            row_legs.prop(settings, "right_leg_name", text="")
+
+            col_step = box4.column(align=True)
+            col_step.prop(settings, "sneak_width_mult", text=tr("Stance Width", lang))
+            col_step.prop(settings, "sneak_step_height_ratio", text=tr("Step Lift Mult", lang))
+            col_step.prop(settings, "bone_name_mask")
+
+            # 4. Центр Масс (COM)
+            box5 = layout.box()
+            box5.label(text=tr("Center of Mass", lang), icon='CENTER_ONLY')
+            box5.prop(settings, "center_enabled")
+            if settings.center_enabled:
+                col_com = box5.column(align=True)
+                col_com.prop(settings, "center_apply_mode", text="")
+                col_com.prop(settings, "center_target_bone", text="Target")
+                col_com.prop(settings, "center_bob_amount", text="Vertical Bob")
+                col_com.prop(settings, "center_preserve_height")
+
+            # 5. Стабилизация (IK)
+            box6 = layout.box()
+            box6.label(text=tr("Stabilization (IK)", lang), icon='CONSTRAINT_BONE')
+            box6.prop(settings, "use_ik", text=tr("Use Sticky Feet", lang))
+            if settings.use_ik:
+                box6.prop(settings, "ik_chain_count")
+                box6.prop(settings, "ik_interpolation_mode", text="Interpolation")
+
+        # В методе draw класса PW_PT_LivingPanel, добавьте:
+
+        elif settings.animation_type == 'STUN':
+            box = layout.box()
+            box.label(text=tr("STUN / DIZZY ANIMATION", lang))
+            box.operator("pw.generate_animation", text=tr("Generate Stun Animation", lang), icon='MOD_PHYSICS')
+
+            # Основные настройки - ТОЛЬКО те, что есть в функции
+            box2 = layout.box()
+            box2.label(text=tr("Stun Settings", lang))
+            col = box2.column(align=True)
+            col.prop(settings, "stun_duration", text=tr("Stun Duration (s)", lang))
+            col.prop(settings, "stun_severity", text=tr("Wobble Amount", lang))
+
+            # Информация о фиксированных фазах (из кода функции)
+            box_info = box2.box()
+            box_info.label(text="Fixed phases (from code):", icon='INFO')
+            box_info.label(text="• Impact: 0.3s (hardcoded)")
+            box_info.label(text="• Recovery: 0.8s (hardcoded)")
+
+            # Общие настройки кадров
+            box3 = layout.box()
+            box3.label(text=tr("Frame Settings", lang))
+            box3.prop(settings, "frame_start", text="Start Frame")
+            # frame_end будет вычислен автоматически в функции
+
+            # Настройки ног (используются в функции для IK)
+            box4 = layout.box()
+            box4.label(text=tr("Leg Settings", lang))
+            box4.prop(settings, "use_ik", text=tr("Use IK (Keep Feet Planted)", lang))
+            if settings.use_ik:
+                row = box4.row(align=True)
+                row.prop(settings, "left_leg_name", text=tr("Left Leg", lang))
+                row.prop(settings, "right_leg_name", text=tr("Right Leg", lang))
+
+            # Центр масс (COM) - используется в функции через apply_center_motion
+            box5 = layout.box()
+            box5.label(text=tr("Center of Mass", lang))
+            box5.prop(settings, "center_enabled", text=tr("Enable Body Movement", lang))
+            if settings.center_enabled:
+                box5.prop(settings, "center_apply_mode", text=tr("Apply To", lang))
+                box5.prop(settings, "center_target_bone")
+                box5.prop(settings, "center_preserve_height")
+                box5.prop(settings, "center_bob_amount", text=tr("Bob Amount", lang))
+
+            # Подсказка
+            layout.separator()
+            layout.label(text="Note: Uses existing stun_animation.py function", icon='INFO')
+
+        elif settings.animation_type == 'DEATH':
+            box = layout.box()
+            box.label(text=tr("DEATH ANIMATION", lang))
+            box.operator("pw.generate_animation", text=tr("Generate Death Animation", lang), icon='MOD_PHYSICS')
+
+            # Основные настройки смерти
+            box2 = layout.box()
+            box2.label(text=tr("Death Settings", lang))
+            box2.prop(settings, "death_type", text=tr("Death Style", lang))
+            box2.prop(settings, "death_speed", text=tr("Death Speed", lang))
+            box2.prop(settings, "death_agony_duration", text=tr("Agony Frames", lang))
+
+            # Настройки падения (используются в смерти)
+            box3 = layout.box()
+            box3.label(text=tr("Fall Settings (for Death)", lang))
+            box3.prop(settings, "fall_height", text=tr("Drop Height", lang))
+
+            # Настройки ног (для IK и позиционирования)
+            box4 = layout.box()
+            box4.label(text=tr("Leg Settings", lang))
+            box4.prop(settings, "left_leg_name", text=tr("Left Bone", lang))
+            box4.prop(settings, "right_leg_name", text=tr("Right Bone", lang))
+            box4.prop(settings, "bone_name_mask")
+
+            # Центр масс (важно для падения)
+            box5 = layout.box()
+            box5.label(text=tr("Center of Mass", lang))
+            box5.prop(settings, "center_enabled")
+            box5.prop(settings, "center_apply_mode", text=tr("Center Apply", lang))
+            box5.prop(settings, "center_target_bone", text=tr("Pelvis/Root Bone", lang))
+
+            # IK настройки (для прилипания ног)
+            box6 = layout.box()
+            box6.label(text=tr("IK Settings", lang))
+            box6.prop(settings, "use_ik", text=tr("Use IK for Legs", lang))
+            if settings.use_ik:
+                box6.prop(settings, "ik_interpolation_mode", text=tr("IK Interpolation", lang))
+
+        # В классе PW_PT_LivingPanel в методе draw добавьте блок для RAGE:
+        elif settings.animation_type == 'RAGE':
+            box = layout.box()
+            box.label(text="RAGE ANIMATION", icon='GHOST_ENABLED')
+            box.operator("pw.generate_animation", text="Generate Rage Animation", icon='FORCE_FORCE')
+
+            # Быстрые пресеты
+            box2 = layout.box()
+            box2.label(text="Quick Presets")
+            row = box2.row(align=True)
+
+            op1 = row.operator("pw.apply_preset", text="Berserk Roar")
+            op1.preset_type = 'RAGE_BERSERK'
+
+            op2 = row.operator("pw.apply_preset", text="Stalker Intimidate")
+            op2.preset_type = 'RAGE_STALKER'
+
+            # Основные настройки
+            box3 = layout.box()
+            box3.label(text="Rage Settings")
+            col = box3.column(align=True)
+            col.prop(settings, "rage_profile", text="Rage Profile")
+            col.prop(settings, "rage_intensity", text="Intensity")
+
+            # Фазовые настройки
+            box4 = layout.box()
+            box4.label(text="Phase Settings")
+            box4.prop(settings, "rage_use_phases", text="Use Phases")
+
+            if settings.rage_use_phases:
+                col = box4.column(align=True)
+                col.prop(settings, "rage_intro_frames", text="Intro Frames")
+                col.prop(settings, "rage_loop_frames", text="Loop Frames")
+                col.prop(settings, "rage_end_frames", text="End Frames")
+
+            # Выбор костей
+            box5 = layout.box()
+            box5.label(text="Bone Selection", icon='BONE_DATA')
+
+            # Кнопка автозаполнения
+            row = box5.row()
+            row.operator("pw.rage_auto_fill", icon='AUTO', text="Auto-Fill Bones")
+
+            # Primary Bones (спина)
+            col = box5.column(align=True)
+            row = col.row()
+            row.prop(settings, "use_rage_primary", text="Primary Bones (Spine)", toggle=True)
+
+            if settings.use_rage_primary:
+                # Кнопки управления для Primary
+                row = col.row(align=True)
+                op_add = row.operator("pw.bone_list_add", text="", icon='ADD')
+                op_add.target_list = 'rage_primary'
+                op_rem = row.operator("pw.bone_list_remove", text="", icon='REMOVE')
+                op_rem.target_list = 'rage_primary'
+
+                # Список Primary костей
+                if settings.rage_bones_primary:
+                    box_list = col.box()
+                    for i, item in enumerate(settings.rage_bones_primary):
+                        row = box_list.row(align=True)
+                        if i == settings.rage_active_primary:
+                            row.label(text="•", icon='DOT')
+                        else:
+                            row.label(text="", icon='BLANK1')
+
+                        row.prop(item, "bone_name", text="")
+
+                        if item.bone_name:
+                            sub = row.row(align=True)
+                            sub.scale_x = 0.7
+                            sub.prop(item, "weight", text="W", slider=True)
+
+            # Secondary Bones (голова, руки)
+            col.separator()
+            row = col.row()
+            row.prop(settings, "use_rage_secondary", text="Secondary Bones (Head/Arms)", toggle=True)
+
+            if settings.use_rage_secondary:
+                # Кнопки управления для Secondary
+                row = col.row(align=True)
+                op_add = row.operator("pw.bone_list_add", text="", icon='ADD')
+                op_add.target_list = 'rage_secondary'
+                op_rem = row.operator("pw.bone_list_remove", text="", icon='REMOVE')
+                op_rem.target_list = 'rage_secondary'
+
+                # Список Secondary костей
+                if settings.rage_bones_secondary:
+                    box_list = col.box()
+                    for i, item in enumerate(settings.rage_bones_secondary):
+                        row = box_list.row(align=True)
+                        if i == settings.rage_active_secondary:
+                            row.label(text="•", icon='DOT')
+                        else:
+                            row.label(text="", icon='BLANK1')
+
+                        row.prop(item, "bone_name", text="")
+
+                        if item.bone_name:
+                            sub = row.row(align=True)
+                            sub.scale_x = 0.7
+                            sub.prop(item, "weight", text="W", slider=True)
+
+            # Центр масс
+            box6 = layout.box()
+            box6.label(text="Center of Mass")
+            box6.prop(settings, "center_enabled")
+            if settings.center_enabled:
+                box6.prop(settings, "center_apply_mode", text="Apply To")
+                box6.prop(settings, "center_target_bone")
+                box6.prop(settings, "center_preserve_height")
+
+            # IK фиксация ног
+            box7 = layout.box()
+            box7.label(text="Leg Stabilization")
+            box7.prop(settings, "use_ik", text="Use IK (Sticky Feet)")
+            if settings.use_ik:
+                row = box7.row(align=True)
+                row.prop(settings, "left_leg_name", text="Left Leg")
+                row.prop(settings, "right_leg_name", text="Right Leg")
+
+            # Расширенные настройки
+            box8 = layout.box()
+            box8.prop(settings, "show_advanced_rage",
+                      text="Advanced Settings",
+                      icon='TRIA_DOWN' if settings.show_advanced_rage else 'TRIA_RIGHT',
+                      emboss=False)
+
+            if settings.show_advanced_rage:
+                # Физические параметры
+                box_physics = box8.box()
+                box_physics.label(text="Physics Parameters")
+                box_physics.prop(settings, "noise_amount", text="Adrenaline Noise")
+
+                # Дыхание
+                box_breath = box8.box()
+                box_breath.label(text="Breathing Pattern")
+                box_breath.prop(settings, "idle_amp", text="Breath Amplitude")
+                box_breath.prop(settings, "idle_freq", text="Breath Frequency")
+
+                # Эффекты
+                box_effects = box8.box()
+                box_effects.label(text="Additional Effects")
+                box_effects.prop(settings, "damage_shake", text="Add Micro Shake")
+
+        elif settings.animation_type == 'FALL':
+            box = layout.box()
+            box.label(text=tr("FALL ANIMATION", lang))
+            box.operator("pw.generate_animation", text=tr("Generate Fall Animation", lang), icon='MOD_PHYSICS')
+
+            # --- Настройки падения ---
+            box2 = layout.box()
+            box2.label(text=tr("Fall Parameters", lang))
+            box2.prop(settings, "fall_height", text=tr("Drop Height", lang))
+            box2.prop(settings, "fall_speed_fwd", text=tr("Forward Speed", lang))
+            box2.prop(settings, "fall_type", text=tr("Fall Type", lang))
+
+            # --- Подтипы и детали ---
+            box3 = layout.box()
+            box3.label(text=tr("Fall Details", lang))
+            box3.prop(settings, "fall_initial_jump", text=tr("Initial Hop", lang))
+            box3.prop(settings, "fall_air_resistance", text=tr("Air Drag", lang))
+            box3.prop(settings, "fall_land_heavy", text=tr("Impact Heaviness", lang))
+
+            # --- Выбор ног ---
+            box4 = layout.box()
+            box4.label(text=tr("Leg Selection", lang))
+            box4.prop(settings, "left_leg_name", text=tr("Left Bone (override)", lang))
+            box4.prop(settings, "right_leg_name", text=tr("Right Bone (override)", lang))
+            box4.prop(settings, "bone_name_mask")
+
+            # --- Центр масс ---
+            box5 = layout.box()
+            box5.label(text=tr("Center of Mass", lang))
+            box5.prop(settings, "center_enabled", text=tr("Enable COM", lang))
+            if settings.center_enabled:
+                box5.prop(settings, "center_apply_mode", text=tr("Apply To", lang))
+                box5.prop(settings, "center_target_bone", text=tr("COM Bone", lang))
+                box5.prop(settings, "center_preserve_height", text=tr("Preserve Height", lang))
+                box5.prop(settings, "center_bob_amount", text=tr("Impact Bob", lang))
+
+            # --- Анимация рук ---
+            box6 = layout.box()
+            box6.label(text=tr("Arm Animation", lang))
+            box6.prop(settings, "use_arm_animation", text=tr("Animate Arms", lang))
+            if settings.use_arm_animation:
+                box6.prop(settings, "arm_swing_amount", text=tr("Arm Flail Amount", lang))
+                box6.prop(settings, "arm_stiffness", text=tr("Arm Stiffness", lang))
+
+            # --- IK / Ноги ---
+            box7 = layout.box()
+            box7.label(text=tr("Leg Stabilization", lang))
+            box7.prop(settings, "use_ik", text=tr("Use IK (Sticky Feet)", lang))
+            if settings.use_ik:
+                box7.prop(settings, "ik_chain_count", text=tr("IK Chain Count", lang))
+                box7.prop(settings, "ik_interpolation_mode", text=tr("IK Interpolation", lang))
+                if settings.ik_interpolation_mode == 'CONSTANT_SPEED':
+                    box7.prop(settings, "ik_constant_speed", text=tr("IK Speed", lang))
+                elif settings.ik_interpolation_mode == 'SPRING':
+                    box7.prop(settings, "ik_spring_stiffness", text=tr("Spring Stiffness", lang))
+                    box7.prop(settings, "ik_spring_damping", text=tr("Spring Damping", lang))
+
+            # --- Squash & Stretch ---
+            box8 = layout.box()
+            box8.label(text=tr("Impact Deformation", lang))
+            box8.prop(settings, "jump_squash", text=tr("Squash on Impact", lang))
+            box8.prop(settings, "jump_stretch", text=tr("Stretch During Fall", lang))
+
+            # --- Тайминг ---
+            box9 = layout.box()
+            box9.label(text=tr("Timing", lang))
+            box9.prop(settings, "frame_start", text=tr("Start Frame", lang))
+            box9.prop(settings, "frame_end", text=tr("End Frame", lang))
+            box9.prop(settings, "frequency", text=tr("Fall Cycles", lang))
         else:
             # Fallback: show a compact set for other animation types
             box = layout.box()
@@ -870,6 +1547,11 @@ class PW_PT_SimplePanel(bpy.types.Panel):
         row.operator("pw.generate_simple_roll", text="Roll")
         row.operator("pw.generate_simple_fly", text="Fly")
 
+        # НОВЫЕ КНОПКИ: DEATH и STUN
+        row = layout.row(align=True)
+        row.operator("pw.simple_generate_death", text="Death", icon='MOD_PHYSICS')
+        row.operator("pw.simple_generate_stun", text="Stun", icon='FORCE_TURBULENCE')
+
         layout.separator()
 
         # TARGET SELECTION - NEW SECTION
@@ -897,7 +1579,6 @@ class PW_PT_SimplePanel(bpy.types.Panel):
         box_idle = layout.box()
         box_idle.label(text="Idle (subtle) Settings")
         box_idle.prop(s, "idle_amp", text="Vertical Amp")
-        box_idle.prop(s, "idle_freq", text="Wobble Freq")
         box_idle.prop(s, "idle_rot_deg", text="Tilt Deg")
         box_idle.prop(s, "idle_stiffness", text="Spring Stiffness")
         box_idle.prop(s, "idle_damping", text="Spring Damping")
@@ -938,6 +1619,7 @@ class PW_PT_SimplePanel(bpy.types.Panel):
 
         # Common Target
         box_jump.prop(s, "jump_height", text="Target Height")
+        box_jump.prop(s, "move_distance", text=tr("Jump Distance"))
 
         if s.jump_physics_enabled:
             # Physics Settings
@@ -970,11 +1652,61 @@ class PW_PT_SimplePanel(bpy.types.Panel):
         box_dmg.prop(s, "damage_shake_freq", text="Shake Freq")
 
         # Dodge
+        # ===== ОБНОВЛЕННЫЙ БЛОК DODGE SETTINGS =====
         box_dodge = layout.box()
-        box_dodge.label(text="Dodge Settings")
-        box_dodge.prop(s, "dodge_lateral_dist", text="Lateral Dist")
-        box_dodge.prop(s, "dodge_quick_frac", text="Quick Fraction")
-        box_dodge.prop(s, "dodge_side", text="Side (L/R)")
+        box_dodge.label(text="Dodge Settings", icon='ARMATURE_DATA')
+
+        col = box_dodge.column(align=True)
+        col.prop(s, "dodge_style", text="Style")
+        col.prop(s, "dodge_lateral_dist", text="Lateral Distance")
+        col.prop(s, "dodge_side", text="Side (L/R)")
+
+        if s.dodge_style == 'SIMPLE':
+            col.prop(s, "dodge_quick_frac", text="Dodge Speed")
+            box_info = box_dodge.box()
+            box_info.label(text="Simple Style Phases:", icon='INFO')
+            box_info.label(text="1. Dodge: Move + Z-axis turn")
+            box_info.label(text="2. Hold: Short pause")
+            box_info.label(text="3. Return: Full recovery to start")
+
+        # Показываем параметры в зависимости от выбранного стиля
+        elif s.dodge_style == 'HOP':
+            col.prop(s, "dodge_hop_height", text="Hop Height")
+            col.prop(s, "dodge_quick_frac", text="Quick Fraction")
+
+            box_info = box_dodge.box()
+            box_info.label(text="Hop Style Phases:", icon='INFO')
+            box_info.label(text="1. Anticipation (15%): Crouch preparation")
+            box_info.label(text="2. Air (55%): Jump arc with banking")
+            box_info.label(text="3. Land (30%): Impact and recovery")
+
+        elif s.dodge_style == 'SLIDE':
+            col.prop(s, "dodge_slide_tilt", text="Slide Tilt (deg)")
+            col.prop(s, "dodge_quick_frac", text="Quick Fraction")
+
+            box_info = box_dodge.box()
+            box_info.label(text="Slide Style Phases:", icon='INFO')
+            box_info.label(text="1. Quick start: Fast lateral movement")
+            box_info.label(text="2. Slide: Tilted body glide")
+            box_info.label(text="3. Slow stop: Controlled deceleration")
+
+        elif s.dodge_style == 'MATRIX':
+            col.prop(s, "dodge_matrix_lean", text="Matrix Lean (deg)")
+            col.prop(s, "dodge_quick_frac", text="Quick Fraction")
+
+            box_info = box_dodge.box()
+            box_info.label(text="Matrix Style Phases:", icon='INFO')
+            box_info.label(text="1. Lean (30%): Body leans to side")
+            box_info.label(text="2. Hold (30%): Maintain position")
+            box_info.label(text="3. Return (40%): Smooth recovery")
+
+        # Общая информация
+        box_dodge.separator()
+        col_info = box_dodge.column(align=True)
+        col_info.label(text="Compatible with:", icon='CHECKBOX_HLT')
+        col_info.label(text="- Simple objects (cubes, spheres)")
+        col_info.label(text="- Single-bone armatures")
+        col_info.label(text="- Target bone in complex armatures")
 
         # NEW ANIMATION SETTINGS
         box_surprise = layout.box()
@@ -1017,9 +1749,123 @@ class PW_PT_SimplePanel(bpy.types.Panel):
         if s.allow_scale_changes:
             col.prop(s, "fly_breath_amp", text="Breathing Amplitude")
 
+        # === DEATH ANIMATION SETTINGS ===
+        box_death = layout.box()
+        box_death.label(text="Death Animation Settings", icon='MOD_PHYSICS')
+
+        col = box_death.column(align=True)
+        col.prop(s, "death_style", text="Style")
+
+        # Show settings based on selected style
+        if s.death_style == 'COLLAPSE':
+            col.prop(s, "death_collapse_power", text="Collapse Power")
+            col.prop(s, "death_dissolve_speed", text="Dissolve Speed")
+            col.prop(s, "death_collapse_shake", text="Shake Intensity")
+
+            # Info box for COLLAPSE
+            box_info = box_death.box()
+            box_info.label(text="Collapse Phases:", icon='INFO')
+            box_info.label(text="1. Tremble (20%): Intense shaking")
+            box_info.label(text="2. Collapse (40%): Sinking with shakes")
+            box_info.label(text="3. Dissolve (30%): Slow fading")
+            box_info.label(text="4. Stillness (10%): Complete stop")
+
+        elif s.death_style == 'EXPLOSION':
+            col.prop(s, "death_explosion_power", text="Explosion Power")
+            col.prop(s, "death_spin_speed", text="Spin Speed")
+            col.prop(s, "death_explosion_shake", text="Pre-explosion Shake")
+
+            # Info box for EXPLOSION
+            box_info = box_death.box()
+            box_info.label(text="Explosion Phases:", icon='INFO')
+            box_info.label(text="1. Shake (15%): Pre-explosion vibration")
+            box_info.label(text="2. Explosion (40%): Lift, spin & fall")
+            box_info.label(text="3. Fall (30%): Debris descent")
+            box_info.label(text="4. Smoke (15%): Final remains")
+
+        elif s.death_style == 'FALL':
+            col.prop(s, "death_fall_height", text="Fall Height")
+            col.prop(s, "death_fall_bounce", text="Bounce Strength")
+            col.prop(s, "death_fall_side", text="Side Fall")
+            col.prop(s, "death_fall_rotation", text="Rotation (deg)")
+
+            # Info box for FALL
+            box_info = box_death.box()
+            box_info.label(text="Fall Phases:", icon='INFO')
+            box_info.label(text="1. Stagger (15%): Loss of balance")
+            box_info.label(text="2. Fall (50%): Parabolic drop with spin")
+            box_info.label(text="3. Impact (20%): Bounce and vibration")
+            box_info.label(text="4. Settle (15%): Tremble then stillness")
+
+        elif s.death_style == 'SIDE_TUMBLE':
+            col.prop(s, "death_side_angle", text="Side Angle")
+            col.prop(s, "death_side_wobble", text="Wobble Amount")
+            col.prop(s, "death_side_slide", text="Slide Distance")
+
+            # Info box for SIDE_TUMBLE
+            box_info = box_death.box()
+            box_info.label(text="Side Tumble Phases:", icon='INFO')
+            box_info.label(text="1. Wobble (25%): Losing balance")
+            box_info.label(text="2. Tumble (45%): Falling to side with bounce")
+            box_info.label(text="3. Slide (20%): Sliding on ground")
+            box_info.label(text="4. Settle (10%): Final position")
+
+        elif s.death_style == 'KNOCKBACK':
+            col.prop(s, "death_knockback_distance", text="Knockback Distance")
+            col.prop(s, "death_knockback_height", text="Knockback Height")
+            col.prop(s, "death_knockback_spin", text="Spin Amount")
+
+            # Info box for KNOCKBACK
+            box_info = box_death.box()
+            box_info.label(text="Knockback Phases:", icon='INFO')
+            box_info.label(text="1. Impact (10%): Sudden push back")
+            box_info.label(text="2. Flight (40%): Arcing through air")
+            box_info.label(text="3. Landing (30%): Impact and slide")
+            box_info.label(text="4. Rest (20%): Coming to stop")
+
+
+        # General death info
+        box_death.separator()
+        col_info = box_death.column(align=True)
+        col_info.label(text="Compatible with:", icon='CHECKBOX_HLT')
+        col_info.label(text="- Simple objects (cubes, spheres)")
+        col_info.label(text="- Single-bone armatures (slimes, drones)")
+        col_info.label(text="- Target bone in complex armatures")
+
+        # === SIMPLE STUN SETTINGS ===
+        box_stun = layout.box()
+        box_stun.label(text="Simple Stun Settings", icon='FORCE_TURBULENCE')
+
+        col = box_stun.column(align=True)
+        col.prop(s, "simple_stun_stagger", text="Stagger Amount")
+        col.prop(s, "simple_stun_shake", text="Shake Intensity")
+        col.prop(s, "simple_stun_recovery", text="Recovery Speed")
+
+        # Расширенные настройки Stun
+        box_adv = box_stun.box()
+        box_adv.prop(s, "show_advanced_simple_stun",
+                     text="Advanced Settings",
+                     icon='TRIA_DOWN' if getattr(s, "show_advanced_simple_stun", False) else 'TRIA_RIGHT',
+                     emboss=False)
+
+        if getattr(s, "show_advanced_simple_stun", False):
+            adv_col = box_adv.column(align=True)
+            adv_col.prop(s, "simple_stun_tilt_amount", text="Body Tilt (deg)")
+            adv_col.prop(s, "simple_stun_lean_amount", text="Body Lean (deg)")
+            adv_col.prop(s, "simple_stun_vibration_freq", text="Vibration Freq")
+            adv_col.prop(s, "simple_stun_decay_rate", text="Decay Rate")
+
+        # Информация о фазах
+        box_info = box_stun.box()
+        box_info.label(text="Animation Phases:", icon='INFO')
+        box_info.label(text="1. Stagger (30%): Loss of balance, tilt")
+        box_info.label(text="2. Shake (40%): Multi-frequency trembling")
+        box_info.label(text="3. Recovery (30%): Smooth return to normal")
+
         layout.separator()
         layout.label(text="Tip: enable 'Single Phase' for monopods/wheels/slimes.")
         layout.prop(s, "ui_language", text="UI Lang")
+
 
 
 # Registration helpers
