@@ -168,7 +168,46 @@ def init_walk_state(arm_obj, left_name_in, right_name_in, settings, frame_start,
     state['left_name'] = left_rest.name
     state['right_name'] = right_rest.name
     # В функцию init_walk_state, после обнаружения ног, добавить:
+    # ==========================================================================
+    # НОВЫЙ БЛОК: АВТОМАТИЧЕСКИЙ ПОИСК СПИНЫ И ГОЛОВЫ
+    # ==========================================================================
 
+    # 1. Ищем голову (Head)
+    # Сначала пробуем настройки, потом ищем по маске 'head', 'neck'
+    head_bone_name = getattr(settings, "spine_end_bone", "")
+    if not head_bone_name or head_bone_name not in arm_obj.data.bones:
+        head_bone_name = find_target_bone(arm_obj, None, "head", settings=None)
+
+    state['head_name'] = head_bone_name
+
+    # 2. Строим цепочку спины (Spine Chain) от Центра до Головы
+    spine_chain = []
+    if center_name and head_bone_name:
+        # Используем существующую утилиту find_spine_chain
+        spine_chain = find_spine_chain(arm_obj, center_name, head_bone_name)
+
+        # Если find_spine_chain вернул пустоту (например, сложная иерархия),
+        # пробуем простую эвристику: идем от головы к родителям до центра
+        if not spine_chain:
+            curr = arm_obj.data.bones.get(head_bone_name)
+            temp_chain = []
+            safe_count = 0
+            while curr and curr.name != center_name and safe_count < 20:
+                temp_chain.append(curr.name)
+                curr = curr.parent
+                safe_count += 1
+            if curr and curr.name == center_name:
+                spine_chain = list(reversed(temp_chain))  # От центра к голове
+
+    state['spine_chain'] = spine_chain
+
+    # Отладка
+    if getattr(settings, "debug_pw", False):
+        _dbg_write(f"[INIT] Center: {center_name}, Head: {head_bone_name}, Spine: {len(spine_chain)}")
+
+    # ==========================================================================
+    # КОНЕЦ НОВОГО БЛОКА
+    # ==========================================================================
     # --- Arm Detection and Initialization ---
     if getattr(settings, "use_arm_animation", False):
         arm_mask = getattr(settings, "arm_name_mask", "shoulder;upperarm;arm;clavicle")
@@ -1901,15 +1940,17 @@ def calculate_vertical_bob(state, settings, sp_left, sp_right, left_lift, right_
 # затем bake в keyframes на empty. Безопасно: нет edit mode, только evaluated_get.
 # Вызывается после генерации анимации, если use_ik=True.
 
-def create_foot_trackers(arm_obj, state, settings):
+def create_foot_trackers(arm_obj, state, settings, correction_vector=None):
     """
     Создаёт empties-трекеры для траектории стоп (left/right), если use_ik=True.
-    Применяет интерполяцию только к траектории (не к f-curves, кроме LINEAR/BEZIER).
+    Исправлена логика pole target: теперь правильно рассчитывается позиция относительно кости.
     """
     if not getattr(settings, "use_ik", False):
         return
 
-    # Гарантируем наличие ik_targets
+    if correction_vector is None:
+        correction_vector = Vector((0, 0, 0))
+
     ik_targets = state.get('ik_targets', {})
     if not ik_targets:
         ik_targets = {
@@ -1925,7 +1966,8 @@ def create_foot_trackers(arm_obj, state, settings):
     if mode not in ['LINEAR', 'BEZIER']:
         for rest_name, trajectory in bone_map.items():
             which_leg = 'left' if 'left' in rest_name.lower() else 'right'
-            bone_map[rest_name] = apply_ik_interpolation(trajectory, settings, state['frame_start'], state['frame_end'], state, which_leg)
+            bone_map[rest_name] = apply_ik_interpolation(trajectory, settings, state['frame_start'], state['frame_end'],
+                                                         state, which_leg)
 
     # Коллекция для трекеров
     coll_name = f"PW_Trackers_{arm_obj.name}"
@@ -1936,6 +1978,7 @@ def create_foot_trackers(arm_obj, state, settings):
         trackers_coll = bpy.data.collections[coll_name]
 
     original_frame = bpy.context.scene.frame_current
+    arm_world = arm_obj.matrix_world
 
     try:
         for rest_name, info in ik_targets.items():
@@ -1952,24 +1995,84 @@ def create_foot_trackers(arm_obj, state, settings):
             empty.empty_display_size = 0.05
             trackers_coll.objects.link(empty)
 
+            # === POLE TRACKER (ИСПРАВЛЕННАЯ ЛОГИКА) ===
+            pole_name = f"PW_Pole_{rest_name}"
+            if pole_name in bpy.data.objects:
+                bpy.data.objects.remove(bpy.data.objects[pole_name], do_unlink=True)
+
+            pole = bpy.data.objects.new(pole_name, None)
+            pole.empty_display_type = 'ARROWS'
+            pole.empty_display_size = 0.08
+            trackers_coll.objects.link(pole)
+
+            # Определяем, левая это или правая нога
+            is_left = 'left' in rest_name.lower() or rest_name == state['left_name']
+
+            # Получаем rest кость для правильного позиционирования
+            rest_bone = arm_obj.data.bones.get(rest_name)
+            if not rest_bone:
+                continue
+
             # Bake траектории в keyframes
             for i, data in enumerate(trajectory):
                 frame = state['frame_start'] + i
                 bpy.context.scene.frame_set(frame)
                 bpy.context.view_layer.update()
 
-                empty.location = data.get('loc', Vector((0,0,0)))
-                empty.rotation_quaternion = data.get('rot', Quaternion((1,0,0,0)))
+                corrected_loc = data.get('loc', Vector((0, 0, 0))) + correction_vector
+
+                empty.location = corrected_loc
+                empty.rotation_quaternion = data.get('rot', Quaternion((1, 0, 0, 0)))
                 empty.keyframe_insert(data_path="location", frame=frame)
                 empty.keyframe_insert(data_path="rotation_quaternion", frame=frame)
+
+                # --- ИСПРАВЛЕННАЯ ЛОГИКА РАСЧЁТА POLE POSITION ---
+                # Используем правильные вектора из state
+                fw = state['fw_world']
+                lat = state['lateral_world_base']  # ИСПРАВЛЕНО: lateral_world_base вместо lateral_world
+                up = Vector((0, 0, 1))  # Мировая ось Z
+
+                # Определяем мировую позицию колена (head кости бедра)
+                knee_world = arm_world @ Vector(rest_bone.head_local)
+
+                # Получаем настройки из settings
+                dist = float(getattr(settings, "ik_pole_distance", 0.35))
+                fwd_bias = float(getattr(settings, "ik_pole_forward_bias", 0.2))
+                lat_bias = float(getattr(settings, "ik_pole_lateral_bias", 1.0))
+                up_bias = float(getattr(settings, "ik_pole_up_bias", 0.0))
+
+                # Рассчитываем смещение
+                # Для левой ноги: смещение влево (вдоль lateral)
+                # Для правой ноги: смещение вправо (противоположное lateral)
+                lateral_direction = lat if is_left else -lat
+
+                offset = (fw * fwd_bias + lateral_direction * lat_bias + up * up_bias)
+                if offset.length_squared > 1e-6:
+                    offset = offset.normalized() * dist
+
+                # Дополнительная коррекция: немного назад от колена
+                back_offset = -fw * dist * 0.3
+
+                pole.location = knee_world + offset + back_offset
+                pole.keyframe_insert(data_path="location", frame=frame)
+
+                # Отладочная информация
+                if getattr(settings, "debug_pw", False) and i == 0:
+                    _dbg_write(f"[POLE DEBUG] {rest_name}: is_left={is_left}")
+                    _dbg_write(f"[POLE DEBUG] knee_world={knee_world}")
+                    _dbg_write(f"[POLE DEBUG] lateral_direction={lateral_direction}")
+                    _dbg_write(f"[POLE DEBUG] offset={offset}")
+                    _dbg_write(f"[POLE DEBUG] pole.location={pole.location}")
 
             # Настройка f-curves интерполяции (только для LINEAR/BEZIER)
             if mode in ['LINEAR', 'BEZIER']:
                 apply_default_interpolation(empty, mode)
+                apply_default_interpolation(pole, mode)
 
     finally:
         bpy.context.scene.frame_set(original_frame)
         bpy.context.view_layer.update()
+
 
 
 
@@ -2095,6 +2198,7 @@ def setup_ik_on_feet_with_trackers(arm_obj, state, settings):
             empty_target = bpy.data.objects.get(f"PW_Tracker_{rest_name}")
             if not empty_target:
                 continue
+            pole_obj = bpy.data.objects.get(f"PW_Pole_{rest_name}")
 
             # Создаём новый IK констрейнт
             ik_con = foot_pose.constraints.new('IK')
@@ -2108,6 +2212,13 @@ def setup_ik_on_feet_with_trackers(arm_obj, state, settings):
             # Опционально: ключ на influence
             bpy.context.scene.frame_set(state['frame_start'])
             ik_con.keyframe_insert(data_path="influence")
+
+            if pole_obj:
+                ik_con.pole_target = pole_obj
+                ik_con.pole_angle = (
+                    math.pi if getattr(settings, "ik_invert_knee", False) else 0.0
+                )
+
 
     finally:
         bpy.context.scene.frame_set(original_frame)
@@ -3056,3 +3167,182 @@ def get_current_foot_position(arm_obj, leg_name, settings):
             return arm_obj.matrix_world @ data_foot.tail_local
         else:
             return arm_obj.matrix_world.translation.copy()
+            
+# Добавьте эти функции для поддержки уклонения:
+
+def calculate_dodge_trajectory(start_pos, direction, distance, duration_frames, ease_in='BACK', ease_out='SINE'):
+    """Вычисляет траекторию уклонения с заданным easing"""
+    trajectory = []
+    
+    for i in range(duration_frames):
+        t = i / (duration_frames - 1) if duration_frames > 1 else 0
+        
+        # Применяем easing
+        if t < 0.5:
+            # Первая половина: ease in
+            if ease_in == 'BACK':
+                eased = ease_in_out_back(t * 2) / 2
+            elif ease_in == 'BOUNCE':
+                eased = bounce_ease_in(t * 2) / 2
+            elif ease_in == 'ELASTIC':
+                eased = elastic_ease_in(t * 2) / 2
+            else:  # QUART или по умолчанию
+                eased = ease_out_quart(t * 2) / 2
+        else:
+            # Вторая половина: ease out
+            if ease_out == 'SINE':
+                eased = 0.5 + (math.sin((t - 0.5) * math.pi) / 2)
+            elif ease_out == 'CIRC':
+                eased = 0.5 + (1 - math.sqrt(1 - ((t - 0.5) * 2) ** 2)) / 2
+            elif ease_out == 'EXP':
+                eased = 0.5 + (math.exp((t - 0.5) * 2) - 1) / (math.exp(1) - 1) / 2
+            else:  # LINEAR
+                eased = t
+        
+        current_pos = start_pos + (direction * distance * eased)
+        trajectory.append(current_pos)
+    
+    return trajectory
+
+def get_threat_direction_vector(threat_direction, fw_world, lateral_world):
+    """Преобразует текстовое направление угрозы в вектор"""
+    if threat_direction == 'FRONT':
+        return fw_world
+    elif threat_direction == 'LEFT':
+        return lateral_world
+    elif threat_direction == 'RIGHT':
+        return -lateral_world
+    elif threat_direction == 'DIAGONAL_LEFT':
+        return (fw_world + lateral_world).normalized()
+    elif threat_direction == 'DIAGONAL_RIGHT':
+        return (fw_world - lateral_world).normalized()
+    else:  # RANDOM
+        return Vector((random.uniform(-1, 1), random.uniform(-1, 1), 0)).normalized()
+
+def apply_counter_rotation(bone, target_vector, strength, frame):
+    """Применяет контр-вращение для фокусировки головы"""
+    if not bone:
+        return
+    
+    # Вычисляем необходимый поворот
+    current_forward = bone.matrix.to_3x3() @ Vector((0, 1, 0))
+    target_forward = target_vector.normalized()
+    
+    # Вычисляем ось и угол вращения
+    rotation_axis = current_forward.cross(target_forward)
+    if rotation_axis.length > 0.001:
+        rotation_axis.normalize()
+        rotation_angle = current_forward.angle(target_forward) * strength
+        
+        # Создаем кватернион
+        rotation_quat = Quaternion(rotation_axis, rotation_angle)
+        
+        # Применяем с учетом текущей ротации
+        bone.rotation_quaternion = (rotation_quat @ bone.rotation_quaternion).normalized()
+        bone.keyframe_insert("rotation_quaternion", frame=frame)
+
+# Easing functions для уклонения
+def bounce_ease_out(t):
+    if t < 1 / 2.75:
+        return 7.5625 * t * t
+    elif t < 2 / 2.75:
+        t -= 1.5 / 2.75
+        return 7.5625 * t * t + 0.75
+    elif t < 2.5 / 2.75:
+        t -= 2.25 / 2.75
+        return 7.5625 * t * t + 0.9375
+    else:
+        t -= 2.625 / 2.75
+        return 7.5625 * t * t + 0.984375
+
+def elastic_ease_out(t):
+    if t == 0 or t == 1:
+        return t
+    return math.pow(2, -10 * t) * math.sin((t - 0.075) * (2 * math.pi) / 0.3) + 1
+
+# ==============================================================================
+# 1. ДИНАМИКА ВТОРОГО ПОРЯДКА (Для сочности)
+# ==============================================================================
+class SecondOrderDynamics:
+    def __init__(self, f, z, r, x0):
+        # f: frequency (скорость), z: damping (вязкость), r: response (начальный отклик)
+        self.k1 = z / (math.pi * f)
+        self.k2 = 1 / ((2 * math.pi * f) ** 2)
+        self.k3 = r * z / (2 * math.pi * f)
+        self.xp = x0
+        self.y = x0
+        self.yd = Vector((0, 0, 0))
+
+    def update(self, dt, x):
+        xd = (x - self.xp) / dt
+        self.xp = x
+        k2_stable = max(self.k2, 1.1 * (dt*dt/4 + dt*self.k1/2))
+        self.y = self.y + dt * self.yd
+        self.yd = self.yd + dt * (x + self.k3*xd - self.y - self.k1*self.yd) / k2_stable
+        return self.y
+
+
+def global_delta_to_bone_local(arm_obj, pose_bone, delta_global_loc=None, delta_global_rot_axis=None,
+                               delta_global_rot_angle=0.0):
+    """
+    Преобразует глобальные изменения в локальные трансформации для кости,
+    с учётом локальной ориентации кости в арматуре.
+
+    Для mono-bone юнитов: кость движется как независимый объект,
+    но с сохранением её локальной ориентации.
+
+    Результат:
+    - delta_local_loc: Vector для добавления к pose_bone.location
+    - local_rot_quat: Quaternion для умножения на текущий rotation_quaternion кости
+    """
+    if delta_global_loc is None:
+        delta_global_loc = Vector((0.0, 0.0, 0.0))
+
+    # 1. Получаем текущую мировую матрицу кости
+    # Для правильного преобразования нужно учитывать текущую позу кости
+    bone_matrix = pose_bone.matrix
+
+    # 2. Преобразуем глобальный вектор в локальное пространство кости
+    # Сначала преобразуем глобальный вектор в пространство арматуры
+    arm_world_inv = arm_obj.matrix_world.inverted()
+    delta_in_arm = arm_world_inv.to_3x3() @ delta_global_loc
+
+    # Затем преобразуем из пространства арматуры в локальное пространство кости
+    bone_local_inv = bone_matrix.inverted().to_3x3()
+    delta_local_loc = bone_local_inv @ delta_in_arm
+
+    # 3. Для вращения
+    local_rot = None
+    if delta_global_rot_axis is not None and abs(delta_global_rot_angle) > 1e-8:
+        # Преобразуем глобальную ось вращения в локальное пространство кости
+        axis_g = delta_global_rot_axis.normalized()
+
+        # Сначала в пространство арматуры
+        axis_in_arm = arm_world_inv.to_3x3() @ axis_g
+
+        # Затем в локальное пространство кости
+        axis_local = bone_local_inv @ axis_in_arm
+
+        if axis_local.length < 1e-6:
+            axis_local = Vector((0.0, 0.0, 1.0))
+        else:
+            axis_local.normalize()
+
+        local_rot = Quaternion(axis_local, delta_global_rot_angle)
+
+    return delta_local_loc, local_rot
+
+def get_animation_target(obj, settings):
+    """
+    Возвращает цель анимации: либо весь объект, либо конкретную pose bone.
+    Используется для simple units (одна кость или объект).
+    """
+    # Защита от отсутствия пропов
+    target_type = getattr(settings, "simple_target_type", "OBJECT")
+    target_bone_name = getattr(settings, "simple_target_bone", None)
+
+    if target_type == 'BONE' and target_bone_name and obj.type == 'ARMATURE':
+        pb = obj.pose.bones.get(target_bone_name)
+        if pb:
+            return pb
+    return obj
