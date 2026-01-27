@@ -2,7 +2,7 @@
 import bpy
 from bpy.types import PropertyGroup
 from bpy.props import (
-    StringProperty, BoolProperty, IntProperty, FloatProperty, EnumProperty
+    StringProperty, BoolProperty, IntProperty, FloatProperty, EnumProperty, CollectionProperty
 )
 from .translations import tr
 
@@ -96,6 +96,22 @@ def apply_creature_preset_callback(self, context):
             'damage_shake': True,
             'damage_affect_legs': True,
             'animation_type': 'DAMAGE'
+        },
+        'RAGE_BERSERK': {
+            'rage_profile': 'ROAR',
+            'rage_intensity': 1.5,
+            'rage_intro_frames': 10,
+            'rage_loop_frames': 50,
+            'rage_end_frames': 15,
+            'animation_type': 'RAGE'
+        },
+        'RAGE_STALKER': {
+            'rage_profile': 'INTIMIDATE',
+            'rage_intensity': 1.0,
+            'rage_intro_frames': 20,
+            'rage_loop_frames': 60,
+            'rage_end_frames': 25,
+            'animation_type': 'RAGE'
         }
     }
 
@@ -156,6 +172,7 @@ class DamageBoneEntry(bpy.types.PropertyGroup):
         description="Physical stiffness for this bone"
     )
 
+
 class PW_Settings(PropertyGroup):
     """Properties for Procedural Walk/Turn addon"""
 
@@ -204,6 +221,11 @@ class PW_Settings(PropertyGroup):
             ('DAMAGE_MEDIUM', 'Damage Medium', 'Medium impact with stagger'),
             ('DAMAGE_HEAVY', 'Damage Heavy', 'Heavy impact with complex reaction'),
             ('DAMAGE_KNOCKDOWN', 'Damage Knockdown', 'Knockdown with recovery'),
+            ('RAGE_BERSERK', 'Rage Berserk', 'Roaring berserk rage'),
+            ('RAGE_STALKER', 'Rage Stalker', 'Stalking intimidation rage'),
+            ('DEATH_QUICK', 'Death Quick', 'Quick collapse death'),
+            ('DEATH_DRAMATIC', 'Death Dramatic', 'Dramatic theatrical death'),
+            ('DEATH_SPIRAL', 'Death Spiral', 'Spinning cartoon death'),
         ],
         default='CUSTOM',
         update=apply_creature_preset_callback
@@ -394,6 +416,321 @@ class PW_Settings(PropertyGroup):
     calibration_clamp_max: FloatProperty(name="Calibration Max", default=4.0, min=0.0, max=100.0)
     calibration_scale: FloatProperty(name="Calibration Scale", default=1.0, min=0.0, max=100.0)
 
+    # === SNEAK / CROUCH SETTINGS ===
+    sneak_depth: FloatProperty(
+        name="Crouch Depth",
+        description="How low the hips go (0.0 = standing, 1.0 = ground)",
+        default=0.35, min=0.0, max=0.9
+    )
+    sneak_width_mult: FloatProperty(
+        name="Stance Width",
+        description="Multiplier for leg spread (1.0 = normal, 1.5 = wide/stable)",
+        default=1.2, min=0.5, max=2.5
+    )
+    sneak_spine_arch: FloatProperty(
+        name="Spine Arch",
+        description="Forward lean intensity (radians)",
+        default=0.3, min=-0.5, max=1.2
+    )
+    sneak_step_height_ratio: FloatProperty(
+        name="Stealth Lift",
+        description="Multiplier for step height (helps overstepping obstacles)",
+        default=1.2, min=0.2, max=3.0
+    )
+    sneak_noise_intensity: FloatProperty(
+        name="Sneak Shiver",
+        description="Micro-trembling of the body for tension",
+        default=0.05, min=0.0, max=0.5
+    )
+    sneak_head_stabilize: FloatProperty(
+        name="Head Stabilization",
+        description="Keeps head looking forward while body leans/bobs",
+        default=0.8, min=0.0, max=1.0
+    )
+    sneak_hesitation: FloatProperty(
+        name="Step Hesitation",
+        description="Adds a slight pause mid-step for a 'cautious' look",
+        default=0.3, min=0.0, max=1.0
+    )
+
+    # === STUN SETTINGS ===
+    stun_duration: FloatProperty(
+        name="Stun Duration",
+        default=2.0,
+        min=0.5
+    )
+    stun_severity: FloatProperty(
+        name="Wobble Amount",
+        default=1.0,
+        min=0.1
+    )
+
+    # === DEATH SETTINGS ===
+    death_type: EnumProperty(
+        name="Death Style",
+        items=[
+            ('COLLAPSE', 'Collapse (Universal)', 'Instant loss of tension, gravity takes over (Ragdoll-like)'),
+            ('DRAMATIC', 'Dramatic (Humanoid)', 'Stagger back, theatrical fall (Spore "Hero" death)'),
+            ('SPIRAL', 'Spiral (Cartoon)', 'Spin around Z axis while shrinking/falling'),
+            ('CRUMPLE', 'Crumple (Insect)', 'Limbs curl inward, body drops low (Fetal position)')
+        ],
+        default='COLLAPSE'
+    )
+
+    death_speed: FloatProperty(
+        name="Death Speed",
+        default=1.0,
+        min=0.1,
+        max=5.0,
+        description="Time multiplier for the animation"
+    )
+
+    death_agony_duration: IntProperty(
+        name="Agony Frames",
+        default=15,
+        min=0,
+        description="Time before the actual fall (stagger/freeze)"
+    )
+
+    # === FALL SETTINGS ===
+    fall_height: FloatProperty(
+        name="Drop Height",
+        description="Depth of the fall (meters below start)",
+        default=3.0,
+        min=0.1,
+        max=50.0
+    )
+
+    fall_speed_fwd: FloatProperty(
+        name="Forward Speed",
+        description="Horizontal momentum during fall",
+        default=2.0,
+        min=0.0
+    )
+
+    fall_type: EnumProperty(
+        name="Fall Type",
+        items=[
+            ('CONTROLLED', 'Controlled (Hero)', 'Super-hero landing, feet down, looking forward'),
+            ('PANIC', 'Panic (Flail)', 'Arms waving, legs loose, tumbling look'),
+            ('RAGDOLL', 'Dead Weight', 'No muscle tension until impact')
+        ],
+        default='CONTROLLED'
+    )
+
+    fall_initial_jump: FloatProperty(
+        name="Initial Hop",
+        description="Small upward impulse before falling (walking off ledge)",
+        default=0.2,
+        min=0.0,
+        max=2.0
+    )
+
+    fall_air_resistance: FloatProperty(
+        name="Air Drag",
+        description="Simulates terminal velocity effect (limbs dragging up)",
+        default=0.5,
+        min=0.0,
+        max=1.0
+    )
+
+    fall_land_heavy: FloatProperty(
+        name="Impact Heaviness",
+        description="How much the character squashes on landing",
+        default=1.0,
+        min=0.1,
+        max=3.0
+    )
+
+    # Panic animation properties
+    panic_duration: IntProperty(name="Panic Duration", default=30, min=5, max=200)
+    panic_recovery_duration: IntProperty(name="Recovery Duration", default=30, min=5, max=200)
+    panic_intensity: FloatProperty(name="Intensity", default=1.0, min=0.1, max=3.0)
+    panic_variation: EnumProperty(
+        name="Panic Type",
+        items=[
+            ('COWER', "Cower (Сжаться)", "Drop down and cover head"),
+            ('SPOOKED', "Spooked (Испуг)", "Stand ground, shake, look around"),
+        ],
+        default='COWER'
+    )
+
+    # Advanced panic settings
+    panic_shock_response: FloatProperty(name="Shock Response", default=4.0, min=1.0, max=10.0)
+    panic_tremble_frequency: FloatProperty(name="Tremble Frequency", default=0.8, min=0.1, max=3.0)
+    panic_breath_speed: FloatProperty(name="Breath Speed", default=0.6, min=0.1, max=2.0)
+
+    # Bone lists for panic
+    panic_bones_primary: CollectionProperty(type=DamageBoneEntry)
+    panic_active_primary: IntProperty(default=0)
+    use_panic_primary: BoolProperty(name="Use Primary Bones", default=True)
+
+    panic_bones_secondary: CollectionProperty(type=DamageBoneEntry)
+    panic_active_secondary: IntProperty(default=0)
+    use_panic_secondary: BoolProperty(name="Use Secondary Bones", default=False)
+
+    # Advanced toggle
+    show_advanced_panic: BoolProperty(name="Show Advanced Panic Settings", default=False)
+
+    # Crawl / Climb Properties
+    crawl_surface_angle: FloatProperty(
+        name="Wall Angle",
+        default=0.0, min=-180.0, max=180.0,
+        description="Angle of surface. 0=Floor, 90=Wall, 180=Ceiling"
+    )
+    crawl_speed: FloatProperty(name="Crawl Speed", default=1.0, min=0.1)
+    crawl_stance_width: FloatProperty(name="Stance Width", default=1.3, min=0.5,
+                                      description="Spread legs wider for stability")
+    crawl_body_height: FloatProperty(name="Body Height", default=0.5, min=0.1, max=1.2,
+                                     description="How close body is to surface")
+
+    # В класс PW_Settings добавьте эти свойства:
+
+    # Rage animation properties
+    rage_profile: EnumProperty(
+        name="Rage Profile",
+        description="Type of rage/aggression animation",
+        items=[
+            ('ROAR', "Roar (Berserk)", "Chest out, arms wide, screaming upwards"),
+            ('INTIMIDATE', "Intimidate (Mutant)", "Hunched forward, heavy breathing, stalking"),
+        ],
+        default='ROAR'
+    )
+
+    rage_use_phases: BoolProperty(
+        name="Use Phases",
+        description="Generate Intro/Loop/End sequence",
+        default=True
+    )
+
+    rage_intro_frames: IntProperty(
+        name="Intro Frames",
+        description="Number of frames for buildup/intro",
+        default=15,
+        min=1,
+        max=100
+    )
+
+    rage_loop_frames: IntProperty(
+        name="Loop Frames",
+        description="Number of frames for main rage loop",
+        default=40,
+        min=1,
+        max=300
+    )
+
+    rage_end_frames: IntProperty(
+        name="End Frames",
+        description="Number of frames for recovery/end",
+        default=20,
+        min=1,
+        max=100
+    )
+
+    rage_intensity: FloatProperty(
+        name="Rage Intensity",
+        description="Overall intensity multiplier",
+        default=1.0,
+        min=0.1,
+        max=3.0
+    )
+
+    # UI controls
+    show_advanced_rage: BoolProperty(
+        name="Show Advanced Rage Settings",
+        default=False
+    )
+
+    rage_bones_primary: CollectionProperty(type=DamageBoneEntry)
+    rage_active_primary: IntProperty(default=0)
+    use_rage_primary: BoolProperty(name="Use Primary Bones", default=True)
+
+    rage_bones_secondary: CollectionProperty(type=DamageBoneEntry)
+    rage_active_secondary: IntProperty(default=0)
+    use_rage_secondary: BoolProperty(name="Use Secondary Bones", default=False)
+
+    # В свойство animation_type добавьте 'RAGE':
+    # Найдите в классе PW_Settings свойство animation_type и добавьте этот элемент:
+    # ('RAGE', 'Rage', 'Rage/aggression animation'),
+
+    # Также добавьте пресеты RAGE в функцию apply_creature_preset_callback:
+    # Добавьте в словарь presets:
+
+
+
+# === DODGE SETTINGS ===
+    
+    # 1. Основное
+    dodge_type: EnumProperty(
+        name="Dodge Type",
+        items=[
+            ('SIDESTEP', 'Side Step', 'Quick lateral move'),
+            ('ROLL', 'Roll', 'Evasive maneuver'),
+            ('BACKSTEP', 'Back Step', 'Jump backwards'),
+            ('DUCK', 'Duck', 'Crouch down')
+        ],
+        default='SIDESTEP'
+    )
+    
+    threat_direction: EnumProperty(
+        name="Threat Direction",
+        items=[
+            ('FRONT', 'Front', 'Attack from front'),
+            ('BACK', 'Back', 'Attack from behind'),
+            ('LEFT', 'Left', 'Attack from left'),
+            ('RIGHT', 'Right', 'Attack from right')
+        ],
+        default='FRONT'
+    )
+
+    dodge_distance: FloatProperty(name="Distance", default=1.5, min=0.1)
+    dodge_duration: IntProperty(name="Duration", default=20, min=5)
+    dodge_recovery: IntProperty(name="Recovery Frames", default=10, min=0)
+
+    # 2. Физика (Возвращаем контроль!)
+    dodge_spring_freq: FloatProperty(name="Spring Freq", default=2.5, min=0.1, description="Speed of reaction")
+    dodge_spring_damp: FloatProperty(name="Spring Damping", default=0.6, min=0.0, max=2.0, description="Less = Bouncy, More = Stiff")
+    dodge_anticipation: FloatProperty(name="Anticipation", default=0.2, min=0.0, max=0.5, description="Wind-up movement before dodge")
+    dodge_overshoot: FloatProperty(name="Overshoot", default=0.2, min=0.0, max=1.0, description="Inertia follow-through")
+    
+    # 3. Детализация
+    dodge_crouch: FloatProperty(name="Crouch Amount", default=0.3, min=0.0, max=1.0)
+    dodge_tilt: FloatProperty(name="Tilt Strength", default=1.0, min=0.0, max=2.0)
+    dodge_noise_amount: FloatProperty(name="Noise Amount", default=0.05)
+    
+    # 4. Флаги
+    dodge_sticky_feet: BoolProperty(name="Sticky Feet", default=True, description="Lock feet in place")
+    dodge_counter_rot: BoolProperty(name="Counter Rotation", default=True, description="Keep head focused on threat")
+
+    # 5. Списки костей (Для UI)
+    use_dodge_primary: BoolProperty(name="Use Primary Bones", default=True)
+    use_dodge_secondary: BoolProperty(name="Use Secondary Bones", default=True)
+    
+    # Коллекции (используем тот же тип DamageBoneEntry или создай GenericBoneEntry)
+    dodge_bones_primary: CollectionProperty(type=DamageBoneEntry)
+    dodge_active_primary: IntProperty()
+    
+    dodge_bones_secondary: CollectionProperty(type=DamageBoneEntry)
+    dodge_active_secondary: IntProperty()
+    dodge_strength: FloatProperty(
+        name="Dodge Strength",
+        description="Overall power of the dodge movement",
+        default=1.0,
+        min=0.0,
+        max=5.0
+    )
+        
+    dodge_recovery_frames: IntProperty(
+        name="Recovery Frames",
+        description="Frames to return to idle pose",
+        default=15,
+        min=1
+    )
+
+    dodge_noise_seed: IntProperty(
+        name="Noise Seed",
+        default=42
+    )
     # Damage Animation Properties
     damage_strength: bpy.props.FloatProperty(
         name="Impact Strength",
@@ -881,13 +1218,21 @@ class PW_Settings(PropertyGroup):
         items=[
             ('WALK', 'Walk', ''),
             ('DRONE', 'Drone', ''),
-            ('IDLE', 'Idle', ''),
+            ('IDLE', 'Idle', 'Breathing/balance animation'),  # НОВОЕ
             ('ATTACK', 'Attack', ''),
             ('CUSTOM', 'Custom', ''),
             ('TURN', 'Turn', 'Procedural body turn'),
             ('FULL_BODY_SWING', 'Full Body Swing', 'Full body rotation without return'),
+            ('PANIC', "Panic", "Panic/fear animation"),  # НОВЫЙ ТИП
+            ('DODGE', 'Dodge', 'Procedural dodge animation'),  # НОВОЕ
             ('DAMAGE', 'Damage', 'Damage effect triggered'),
-            ('JUMP', 'Jump', 'Procedural jump with squash/stretch')  # НОВОЕ
+            ('JUMP', 'Jump', 'Procedural jump with squash/stretch'),  # НОВОЕ
+            ('SNEAK', 'Sneak', 'Crouch walk animation'),  # НОВОЕ: Добавьте эту строку
+            ('CRAWL', 'Crawl', 'Crawl/climb animation'),  # Опционально, если нужно
+            ('RAGE', 'Rage', 'Aggressive pose animation'),  # Опционально
+            ('DEATH', 'Death', 'Procedural death animation'),  # ДОБАВЬТЕ ЭТУ СТРОЧКУ
+            ('FALL', 'Fall', 'Procedural falling animation'),  # НОВОЕ
+            ('STUN', 'Stun', 'Stun/dizzy animation')  # ДОБАВЛЕНО
         ],
         default='WALK'
     )
@@ -903,7 +1248,11 @@ class PW_Settings(PropertyGroup):
         ],
         default='VEHICLE'
     )
-
+    # Добавьте параметры для idle анимации (если еще нет):
+    idle_amp: FloatProperty(name="Idle Amp", default=0.05, min=0.0, max=0.5, description="Vertical breathing amplitude")
+    idle_freq: FloatProperty(name="Idle Freq", default=1.0, min=0.1, max=5.0, description="Idle animation frequency")
+    idle_rot_deg: FloatProperty(name="Idle Rotation", default=2.0, min=0.0, max=20.0,
+                                description="Spine rotation amplitude (degrees)")
     # Turn settings
     turn_angles: StringProperty(name="Turn Angles", default="35,5", description="Angle,speed per segment (e.g., '35,5;45,3')")
     turn_speed: FloatProperty(name="Turn Speed", default=5.0, min=0.1, max=10.0)
@@ -1182,15 +1531,77 @@ class PW_Settings(PropertyGroup):
     simple_jump_hang_frac: FloatProperty(name="Simple Jump Hang Fraction", default=0.18, min=0.0, max=1.0)
 
     # Dodge / Damage
-    dodge_distance: FloatProperty(name="Dodge Distance", default=1.0, min=0.0)
-    dodge_quick_frac: FloatProperty(name="Dodge Quick Fraction", default=0.25, min=0.0, max=1.0)
+    # ===== DODGE PROPERTIES =====
+    dodge_style: EnumProperty(
+        name="Dodge Style",
+        description="Style of dodge animation",
+        items=[
+            ('SIMPLE', 'Simple', 'Classic side-move with Z-turn'),  # Старый добрый вариант
+            ('HOP', 'Hop', 'Jump to the side with arc'),
+            ('SLIDE', 'Slide', 'Quick slide with body tilt'),
+            ('MATRIX', 'Matrix', 'Leaning back style (like Matrix)')
+        ],
+        default='SIMPLE'
+    )
 
-    # UI expects different names
-    dodge_lateral_dist: FloatProperty(name="Dodge Lateral Dist", default=1.0, min=0.0)
+    dodge_lateral_dist: FloatProperty(
+        name="Lateral Distance",
+        description="Distance to dodge sideways",
+        default=1.0,
+        min=0.0,
+        soft_max=5.0
+    )
+
     dodge_side: EnumProperty(
         name="Dodge Side",
-        items=[('L', 'Left', ''), ('R', 'Right', '')],
+        description="Direction to dodge",
+        items=[
+            ('L', 'Left', 'Dodge to the left'),
+            ('R', 'Right', 'Dodge to the right')
+        ],
         default='R'
+    )
+
+    dodge_quick_frac: FloatProperty(
+        name="Quick Fraction",
+        description="How quickly the dodge starts (0-1)",
+        default=0.25,
+        min=0.0,
+        max=1.0
+    )
+
+    # Style-specific properties
+    dodge_hop_height: FloatProperty(
+        name="Hop Height",
+        description="Height of hop for HOP style",
+        default=0.3,
+        min=0.0,
+        soft_max=2.0
+    )
+
+    dodge_slide_tilt: FloatProperty(
+        name="Slide Tilt",
+        description="Body tilt angle for SLIDE style (degrees)",
+        default=25.0,
+        min=0.0,
+        max=90.0
+    )
+
+    dodge_matrix_lean: FloatProperty(
+        name="Matrix Lean",
+        description="Body lean angle for MATRIX style (degrees)",
+        default=35.0,
+        min=0.0,
+        max=90.0
+    )
+
+    # Старые свойства для обратной совместимости
+    dodge_distance: FloatProperty(
+        name="Dodge Distance",
+        description="Backward compatibility - use dodge_lateral_dist",
+        default=1.0,
+        min=0.0,
+        options={'HIDDEN'}
     )
 
     damage_shake_amp: FloatProperty(name="Damage Shake Amp", default=0.06, min=0.0)
@@ -1198,7 +1609,7 @@ class PW_Settings(PropertyGroup):
     damage_shake_freq: FloatProperty(name="Damage Shake Freq", default=20.0, min=0.0)
 
     # Turn settings expected by simple UI:
-    turn_overshoot_deg: FloatProperty(name="Turn Overshoot Deg", default=6.0, min=0.0, max=90.0)
+    turn_overshoot_deg: FloatProperty(name="Turn Overshoot Deg", default=6.0, min=-90.0, max=90.0)
     turn_ease: FloatProperty(name="Turn Ease Fraction", default=0.85, min=0.01, max=0.99)
 
     # New animation parameters
@@ -1312,7 +1723,216 @@ class PW_Settings(PropertyGroup):
         default=0.03,
         min=0.0, max=1.0
     )
-# В class PW_Settings добавить:
+
+
+    # === DEATH ANIMATION SETTINGS ===
+    # В death_style добавляем новые варианты:
+    death_style: EnumProperty(
+        name="Death Style",
+        description="Стиль анимации смерти",
+        items=[
+            ('COLLAPSE', 'Collapse', 'Схлопывание и растворение для слизней/сфер'),
+            ('EXPLOSION', 'Explosion', 'Взрывной распад для дронов/техники'),
+            ('FALL', 'Fall', 'Классическое падение (универсальный)'),
+            ('SIDE_TUMBLE', 'Side Tumble', 'Заваливание на бок без падения'),
+            ('KNOCKBACK', 'Knockback', 'Отбрасывание назад от удара'),
+        ],
+        default='COLLAPSE'
+    )
+
+    # SIDE_TUMBLE style settings
+    death_side_angle: FloatProperty(
+        name="Side Angle",
+        description="Угол заваливания на бок (градусы)",
+        default=60.0,
+        min=10.0,
+        max=90.0
+    )
+
+    death_side_wobble: FloatProperty(
+        name="Wobble Amount",
+        description="Колебания при заваливании",
+        default=0.15,
+        min=0.0,
+        max=0.5
+    )
+
+    death_side_slide: FloatProperty(
+        name="Slide Distance",
+        description="Дистанция скольжения по земле",
+        default=0.3,
+        min=0.0,
+        max=1.0
+    )
+
+    # KNOCKBACK style settings
+    death_knockback_distance: FloatProperty(
+        name="Knockback Distance",
+        description="Дистанция отбрасывания назад",
+        default=1.2,
+        min=0.1,
+        max=3.0
+    )
+
+    death_knockback_height: FloatProperty(
+        name="Knockback Height",
+        description="Подъем при отбрасывании",
+        default=0.2,
+        min=0.0,
+        max=1.0
+    )
+
+    death_knockback_spin: FloatProperty(
+        name="Spin Amount",
+        description="Вращение при отбрасывании",
+        default=0.3,
+        min=0.0,
+        max=1.0
+    )
+
+    # COLLAPSE style settings
+    death_collapse_power: FloatProperty(
+        name="Collapse Power",
+        description="Сила схлопывания при смерти",
+        default=0.7,
+        min=0.1,
+        max=2.0
+    )
+
+    death_dissolve_speed: FloatProperty(
+        name="Dissolve Speed",
+        description="Скорость растворения",
+        default=0.5,
+        min=0.1,
+        max=1.0
+    )
+
+    death_collapse_shake: FloatProperty(
+        name="Shake Intensity",
+        description="Интенсивность тряски перед смертью",
+        default=0.15,
+        min=0.0,
+        max=0.5
+    )
+
+    # EXPLOSION style settings
+    death_explosion_power: FloatProperty(
+        name="Explosion Power",
+        description="Сила взрыва при смерти",
+        default=0.8,
+        min=0.1,
+        max=3.0
+    )
+
+    death_spin_speed: FloatProperty(
+        name="Spin Speed",
+        description="Скорость вращения при взрыве",
+        default=3.0,
+        min=0.5,
+        max=10.0
+    )
+
+    death_explosion_shake: FloatProperty(
+        name="Pre-explosion Shake",
+        description="Тряска перед взрывом",
+        default=0.2,
+        min=0.0,
+        max=0.5
+    )
+
+    # FALL style settings
+    death_fall_height: FloatProperty(
+        name="Fall Height",
+        description="Высота падения",
+        default=0.5,
+        min=0.0,
+        max=2.0
+    )
+
+    death_fall_bounce: FloatProperty(
+        name="Bounce Strength",
+        description="Сила отскока при падении",
+        default=0.2,
+        min=0.0,
+        max=1.0
+    )
+
+    death_fall_side: FloatProperty(
+        name="Side Fall",
+        description="Боковое смещение при падении",
+        default=0.3,
+        min=0.0,
+        max=1.0
+    )
+
+    death_fall_rotation: FloatProperty(
+        name="Rotation (deg)",
+        description="Вращение при падении (градусы)",
+        default=90.0,
+        min=0.0,
+        max=360.0
+    )
+
+    # === SIMPLE STUN SETTINGS ===
+    simple_stun_stagger: FloatProperty(
+        name="Stagger Amount",
+        description="Сила потери равновесия (шатание)",
+        default=0.8,
+        min=0.0,
+        max=2.0
+    )
+
+    simple_stun_shake: FloatProperty(
+        name="Shake Intensity",
+        description="Интенсивность дрожи при оглушении",
+        default=0.15,
+        min=0.0,
+        max=1.0
+    )
+
+    simple_stun_recovery: FloatProperty(
+        name="Recovery Speed",
+        description="Скорость восстановления после оглушения",
+        default=0.3,
+        min=0.1,
+        max=1.0
+    )
+
+    simple_stun_tilt_amount: FloatProperty(
+        name="Body Tilt",
+        description="Наклон тела при потере равновесия (градусы)",
+        default=15.0,
+        min=0.0,
+        max=45.0
+    )
+
+    simple_stun_lean_amount: FloatProperty(
+        name="Body Lean",
+        description="Наклон вперед/назад при оглушении (градусы)",
+        default=10.0,
+        min=0.0,
+        max=30.0
+    )
+
+    simple_stun_vibration_freq: FloatProperty(
+        name="Vibration Frequency",
+        description="Частота вибрации при дрожи",
+        default=20.0,
+        min=1.0,
+        max=50.0
+    )
+
+    simple_stun_decay_rate: FloatProperty(
+        name="Decay Rate",
+        description="Скорость затухания дрожи",
+        default=0.7,
+        min=0.1,
+        max=1.0
+    )
+    show_advanced_simple_stun: BoolProperty(
+        name="Show Advanced Stun Settings",
+        default=False
+    )
 
     vehicle_type: EnumProperty(
         name="Vehicle Type",
